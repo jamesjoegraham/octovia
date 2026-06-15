@@ -2,6 +2,14 @@
 name = "octovia"
 version = "0.1.0"
 edition = "2024"
+description = "A pure-Rust, DOM-free state-diagram rendering engine. Text in. Transit-map SVG out."
+license = "MIT"
+repository = "https://github.com/jamesjoegraham/octovia"
+homepage = "https://octovia.org/"
+documentation = "https://docs.rs/octovia"
+readme = "README.md"
+keywords = ["svg", "diagram", "state-machine", "visualization", "wasm"]
+categories = ["visualization", "rendering", "command-line-utilities", "wasm"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
