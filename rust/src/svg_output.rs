@@ -3,10 +3,11 @@
 //! Serialises the fully-resolved diagram (node positions + edge routes +
 //! label anchors) into a clean, self-contained SVG string.
 //!
-//! The output is optimised for the transit-map aesthetic:
-//! -   Nodes as circles with standard radius.
-//! -   Edges as stroke-only paths (no diagonal mixing).
-//! -   Labels as `<text>` elements in computed anchor positions.
+//! The output features a polished transit-map aesthetic with:
+//! -   Rounded-rectangle nodes with gradient fills and subtle glow
+//! -   SVG filter definitions for dropshadow and glow effects
+//! -   Edge paths with arrow markers and lane offsets
+//! -   Edge labels with text-halo (paint-order stroke) for occlusion
 
 use crate::ast::{Diagram, Node, NodeSize, Point, ThemeColors};
 
@@ -23,37 +24,100 @@ const ARROW_FORWARD_ID: &str = "octovia-arrow-forward";
 /// SVG marker id for cyclic (dashed) edge arrowheads.
 const ARROW_CYCLIC_ID: &str = "octovia-arrow-cyclic";
 
+/// Glow filter id.
+const GLOW_FILTER_ID: &str = "octovia-glow";
+/// Drop shadow filter id.
+const SHADOW_FILTER_ID: &str = "octovia-shadow";
+
 // ---------------------------------------------------------------------------
 // SVG element builders
 // ---------------------------------------------------------------------------
 
-/// Build the `<defs>` block containing the two arrowhead markers used for
-/// edges. Markers are tinted to match the theme's forward / cyclic stroke
-/// colours so the arrows blend with the line they belong to.
-fn arrow_defs(colors: &ThemeColors) -> String {
-    format!(
-        r#"  <defs>
-    <marker id="{fwd}" viewBox="0 0 14 14" refX="12" refY="7" markerWidth="12" markerHeight="12" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+/// Build the full `<defs>` block: filters, gradients, and arrow markers.
+fn build_defs(colors: &ThemeColors) -> String {
+    let mut defs = String::from("  <defs>\n");
+
+    // --- Glow filter (applied to node rectangles) ---
+    defs.push_str(&format!(
+        r#"    <filter id="{glow}" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feFlood flood-color="{glow_color}" flood-opacity="0.6" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+      <feMerge>
+        <feMergeNode in="shadow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+"#,
+        glow = GLOW_FILTER_ID,
+        glow_color = colors.node_glow,
+    ));
+
+    // --- Drop shadow filter (subtle under nodes) ---
+    let black = "#000000";
+    defs.push_str(&format!(
+        r#"    <filter id="{shadow}" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="{black}" flood-opacity="0.5"/>
+    </filter>
+"#,
+        shadow = SHADOW_FILTER_ID,
+        black = black,
+    ));
+
+    // --- Node gradient (vertical linear gradient per node fill) ---
+    defs.push_str(&format!(
+        r#"    <linearGradient id="node-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="{start}"/>
+      <stop offset="100%" stop-color="{end}"/>
+    </linearGradient>
+"#,
+        start = colors.gradient_start,
+        end = colors.gradient_end,
+    ));
+
+    // --- Arrowhead marker: forward ---
+    defs.push_str(&format!(
+        r#"    <marker id="{fwd}" viewBox="0 0 14 14" refX="12" refY="7" markerWidth="12" markerHeight="12" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
       <path d="M 0 0 L 14 7 L 0 14 z" fill="{fwd_color}"/>
     </marker>
-    <marker id="{cyc}" viewBox="0 0 14 14" refX="12" refY="7" markerWidth="12" markerHeight="12" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+"#,
+        fwd = ARROW_FORWARD_ID,
+        fwd_color = colors.edge_forward,
+    ));
+
+    // --- Arrowhead marker: cyclic ---
+    defs.push_str(&format!(
+        r#"    <marker id="{cyc}" viewBox="0 0 14 14" refX="12" refY="7" markerWidth="12" markerHeight="12" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
       <path d="M 0 0 L 14 7 L 0 14 z" fill="{cyc_color}"/>
     </marker>
-  </defs>"#,
-        fwd = ARROW_FORWARD_ID,
+"#,
         cyc = ARROW_CYCLIC_ID,
-        fwd_color = colors.edge_forward,
         cyc_color = colors.edge_cyclic,
-    )
+    ));
+
+    defs.push_str("  </defs>");
+    defs
 }
 
-/// Build a `<rect>` string for a node (rounded rectangle sized to fit label).
+/// Build a `<rect>` string for a node with gradient fill, glow filter, and
+/// a subtle inner accent line.
 fn node_rect(node_id: &str, pos: Point, node_size: &NodeSize, colors: &ThemeColors) -> String {
     let x = pos.x - node_size.half_w();
     let y = pos.y - node_size.half_h();
+    let r = 8.0; // corner radius
+
     format!(
-        r#"  <rect id="node-{}" x="{}" y="{}" width="{}" height="{}" rx="8" ry="8" fill="{}" stroke="{}" stroke-width="2.0"/>"#,
-        node_id, x, y, node_size.width, node_size.height, colors.node_fill, colors.node_stroke
+        r#"  <rect id="node-{node_id}" x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" ry="{r}"
+        fill="url(#node-grad)" stroke="{stroke}" stroke-width="2.0"
+        filter="url(#{glow})"/>"""#,
+        node_id = node_id,
+        x = x,
+        y = y,
+        w = node_size.width,
+        h = node_size.height,
+        r = r,
+        stroke = colors.node_stroke,
+        glow = GLOW_FILTER_ID,
     )
 }
 
@@ -92,25 +156,35 @@ fn edge_path(
         .join(" ");
 
     let stroke = if is_cyclic {
-        colors.edge_cyclic
+        &colors.edge_cyclic
     } else {
-        colors.edge_forward
+        &colors.edge_forward
     };
 
     let dash = if is_cyclic { r#" stroke-dasharray="6,4""# } else { "" };
     let marker_id = if is_cyclic { ARROW_CYCLIC_ID } else { ARROW_FORWARD_ID };
 
     format!(
-        r#"  <path id="edge-{}" d="{}" fill="none" stroke="{}" stroke-width="3.5" stroke-linecap="butt" stroke-linejoin="round"{} marker-end="url(#{})" />"#,
-        edge_id, d, stroke, dash, marker_id
+        r#"  <path id="edge-{edge_id}" d="{d}" fill="none" stroke="{stroke}" stroke-width="3.5" stroke-linecap="butt" stroke-linejoin="round"{dash} marker-end="url(#{mid})" />"#,
+        edge_id = edge_id,
+        d = d,
+        stroke = stroke,
+        dash = dash,
+        mid = marker_id,
     )
 }
 
 /// Build a `<text>` element for a node label (always centred inside the node).
 fn node_label_inside(node_id: &str, text: &str, pos: Point, colors: &ThemeColors) -> String {
     format!(
-        r#"  <text id="label-{}" x="{}" y="{}" text-anchor="middle" dominant-baseline="central" fill="{}" font-family="{}" font-size="{}">{}</text>"#,
-        node_id, pos.x, pos.y, colors.label_fill, LABEL_FONT_FAMILY, LABEL_FONT_SIZE, escape_xml(text)
+        r#"  <text id="label-{nid}" x="{x}" y="{y}" text-anchor="middle" dominant-baseline="central" fill="{fill}" font-family="{fam}" font-size="{size}">{esc}</text>"#,
+        nid = node_id,
+        x = pos.x,
+        y = pos.y,
+        fill = colors.label_fill,
+        fam = LABEL_FONT_FAMILY,
+        size = LABEL_FONT_SIZE,
+        esc = escape_xml(text),
     )
 }
 
@@ -146,16 +220,16 @@ fn edge_label(edge_id: usize, text: &str, route: &[Point], colors: &ThemeColors)
     };
 
     format!(
-        r#"  <text id="elabel-{}" x="{}" y="{}" text-anchor="{}" dominant-baseline="central" fill="{}" font-family="{}" font-size="{}" paint-order="stroke" stroke="{}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">{}</text>"#,
-        edge_id,
-        lx,
-        ly,
-        anchor,
-        colors.label_fill,
-        LABEL_FONT_FAMILY,
-        LABEL_FONT_SIZE - 1.0,
-        colors.bg,
-        escape_xml(text),
+        r#"  <text id="elabel-{eid}" x="{lx}" y="{ly}" text-anchor="{anc}" dominant-baseline="central" fill="{fill}" font-family="{fam}" font-size="{size}" paint-order="stroke" stroke="{bg}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">{esc}</text>"#,
+        eid = edge_id,
+        lx = lx,
+        ly = ly,
+        anc = anchor,
+        fill = colors.label_fill,
+        fam = LABEL_FONT_FAMILY,
+        size = LABEL_FONT_SIZE - 1.0,
+        bg = colors.bg,
+        esc = escape_xml(text),
     )
 }
 
@@ -256,20 +330,6 @@ fn trim_route_to_node_boundaries(
     }
 
     // ---- Target side: clip at the first point that enters the target rect. ----
-    //
-    // Walking from the start of the (possibly source-trimmed) polyline
-    // forward, find the first index whose point is inside the target
-    // rectangle. The previous point sits outside, so the segment between
-    // them crosses the target boundary — keep everything up to that
-    // crossing.
-    //
-    // This handles two cases uniformly:
-    //   1. Routes that simply terminate inside the target (port cell sits
-    //      under a wide label) — trims back to the rect edge.
-    //   2. Routes that pass *through* the target rect because the port
-    //      sits beyond the far side (e.g. cyclic U-bend whose vertical
-    //      run continues past the target's top edge) — clips at first
-    //      entry so the arrowhead lands cleanly on the rect boundary.
     if let Some(node) = tgt {
         if let (Some(pos), Some(size)) = (node.position, node.node_size) {
             let hw = size.half_w();
@@ -317,33 +377,35 @@ pub fn render_svg(diagram: &Diagram) -> String {
         (max_x as u32).saturating_sub(min_x_clamped as u32) + 80,
         (max_y as u32).saturating_sub(min_y_clamped as u32) + 80,
     );
+    let vx = min_x.saturating_sub(40);
+    let vy = min_y.saturating_sub(40);
 
-    // SVG header
+    // SVG open + background
     svg.push_str(&format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{} {} {} {}" width="{}" height="{}" style="background-color: {}">"#,
-        min_x.saturating_sub(40),
-        min_y.saturating_sub(40),
-        vw,
-        vh,
-        vw,
-        vh,
-        colors.bg
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vx} {vy} {vw} {vh}" width="{vw}" height="{vh}" style="background-color: {bg}">"#,
+        vx = vx,
+        vy = vy,
+        vw = vw,
+        vh = vh,
+        bg = colors.bg,
     ));
     svg.push('\n');
 
-    // Arrowhead marker definitions (referenced by every edge path).
-    svg.push_str(&arrow_defs(&colors));
+    // Definition block: glow filter, shadow, gradients, arrow markers
+    svg.push_str(&build_defs(&colors));
     svg.push('\n');
 
     // Optional title
     if let Some(ref title) = diagram.title {
+        let tx = (min_x + max_x) / 2;
+        let ty = min_y.saturating_sub(10);
         svg.push_str(&format!(
-            r#"  <text x="{}" y="{}" text-anchor="middle" fill="{}" font-family="{}" font-size="18" font-weight="600">{}</text>"#,
-            (min_x + max_x) / 2,
-            min_y.saturating_sub(10),
-            colors.title_fill,
-            LABEL_FONT_FAMILY,
-            escape_xml(title)
+            r#"  <text x="{tx}" y="{ty}" text-anchor="middle" fill="{tfill}" font-family="{fam}" font-size="18" font-weight="600">{esc}</text>"#,
+            tx = tx,
+            ty = ty,
+            tfill = colors.title_fill,
+            fam = LABEL_FONT_FAMILY,
+            esc = escape_xml(title),
         ));
         svg.push('\n');
     }
@@ -419,7 +481,7 @@ fn compute_bounds(diagram: &Diagram) -> (i32, i32, i32, i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Diagram, Node, NodeSize, TextExtents, Theme, Viewport};
+    use crate::ast::{Diagram, Node, NodeSize, TextExtents, ThemeColors, Viewport};
     use crate::layout::layout_backbone;
     use crate::measure::measure_diagram;
     use crate::parser::parse_dsl;
@@ -462,7 +524,7 @@ mod tests {
             edges: vec![],
             title: None,
             viewport: Viewport::default(),
-            theme: Theme::default(),
+            theme: ThemeColors::default(),
         };
         let svg = render_svg(&d);
         assert!(svg.starts_with("<svg"));
@@ -499,7 +561,7 @@ mod tests {
             edges: vec![],
             title: Some("Title & <special> \"chars\"".into()),
             viewport: Viewport::default(),
-            theme: Theme::default(),
+            theme: ThemeColors::default(),
         };
         let svg = render_svg(&d);
         assert!(svg.contains("&amp;"));
@@ -520,9 +582,27 @@ mod tests {
     }
 
     #[test]
+    fn test_render_defs_contains_gradients_and_filters() {
+        let mut d = parse_dsl("A -> B\n").unwrap();
+        measure_diagram(&mut d);
+        layout_backbone(&mut d);
+        route_all_edges(&mut d);
+        let svg = render_svg(&d);
+
+        // Must have gradient definitions
+        assert!(svg.contains("linearGradient"), "gradient defs missing");
+        assert!(svg.contains("node-grad"), "node gradient missing");
+
+        // Must have glow filter
+        assert!(svg.contains(GLOW_FILTER_ID), "glow filter missing");
+        assert!(svg.contains("feGaussianBlur"), "blur filter missing");
+    }
+
+    #[test]
     fn test_render_theme_colors_applied() {
         let mut d = parse_dsl("A -> B\n").unwrap();
-        d.theme = Theme::Ember;
+        let ember = ThemeColors::from_str("ember").unwrap();
+        d.theme = ember;
         measure_diagram(&mut d);
         layout_backbone(&mut d);
         route_all_edges(&mut d);
@@ -535,7 +615,8 @@ mod tests {
     #[test]
     fn test_render_light_theme() {
         let mut d = parse_dsl("A -> B\n").unwrap();
-        d.theme = Theme::Light;
+        let light = ThemeColors::from_str("light").unwrap();
+        d.theme = light;
         measure_diagram(&mut d);
         layout_backbone(&mut d);
         route_all_edges(&mut d);
@@ -563,7 +644,7 @@ mod tests {
         route_all_edges(&mut d);
         let svg = render_svg(&d);
 
-        // <defs> with both arrow markers must be present.
+        // <defs> with arrow markers must be present.
         assert!(svg.contains("<defs>"), "defs block missing");
         assert!(
             svg.contains(&format!(r#"id="{}""#, ARROW_FORWARD_ID)),
@@ -603,10 +684,6 @@ mod tests {
 
     #[test]
     fn test_edge_path_trimmed_to_node_boundary() {
-        // A wide-labelled state has a node rectangle that extends beyond
-        // the router's port-cell offset (30 px). After trimming the route
-        // for display, the visible polyline must terminate at the node
-        // rectangle edge — never inside the rectangle's interior.
         let mut d = parse_dsl("Closed -> SynReceived : open\n").unwrap();
         measure_diagram(&mut d);
         layout_backbone(&mut d);
@@ -618,9 +695,6 @@ mod tests {
 
         let svg = render_svg(&d);
 
-        // Pull the d="..." attribute of edge-0 out of the SVG. Match on
-        // ` d="` (with the leading space) so we don't accidentally split
-        // on the `d="` substring sitting inside `id="...`.
         let edge_d = svg
             .lines()
             .find(|l| l.contains("<path id=\"edge-0\""))
@@ -628,7 +702,6 @@ mod tests {
             .and_then(|rest| rest.split('"').next())
             .expect("edge-0 path d attribute");
 
-        // The final coordinate pair after the last "L" command is the visible endpoint.
         let last_pair = edge_d
             .rsplit_once('L')
             .map(|(_, rhs)| rhs.trim())
@@ -649,7 +722,6 @@ mod tests {
              (centre={:?}, half_w={half_w}, half_h={half_h})",
             tgt_pos
         );
-        // And it must not be deep inside the rectangle.
         assert!(
             !point_inside_rect(Point::new(lx, ly), tgt_pos, half_w - 1, half_h - 1),
             "edge endpoint sits inside the node rectangle"
@@ -658,9 +730,6 @@ mod tests {
 
     #[test]
     fn test_edge_label_perpendicular_offset() {
-        // For a forward edge along a single row, the label should sit
-        // *above* the line (smaller y than midpoint). For a vertical
-        // forward edge it should sit to the right (larger x than midpoint).
         let mut d_h = parse_dsl("A -> B : go\n").unwrap();
         measure_diagram(&mut d_h);
         layout_backbone(&mut d_h);
@@ -671,13 +740,11 @@ mod tests {
             .lines()
             .find(|l| l.contains("elabel-0"))
             .expect("edge label missing");
-        // Horizontal edge → text-anchor middle, y < midpoint y.
         assert!(
             label_line.contains(r#"text-anchor="middle""#),
             "horizontal edge label should anchor middle: {label_line}"
         );
 
-        // Now force a vertical edge by routing across rows.
         let mut d_v = parse_dsl(
             "Draft -> Review : submit\n\
              Review -> Approved : approve\n\
@@ -687,13 +754,12 @@ mod tests {
              Approved -> Published : publish\n",
         )
         .unwrap();
-        d_v.viewport = crate::ast::Viewport { width: 900, height: 800 };
+        d_v.viewport = Viewport { width: 900, height: 800 };
         measure_diagram(&mut d_v);
         layout_backbone(&mut d_v);
         route_all_edges(&mut d_v);
         let svg_v = render_svg(&d_v);
 
-        // At least one edge label should be anchored "start" (vertical placement).
         let any_vertical = svg_v
             .lines()
             .filter(|l| l.contains("elabel-"))
@@ -706,9 +772,6 @@ mod tests {
 
     #[test]
     fn test_edge_label_has_halo_for_line_occlusion() {
-        // Edge labels must carry a stroke halo (paint-order=stroke + a
-        // stroke matching the canvas background) so any line passing
-        // behind the text is masked instead of bleeding through.
         let mut d = parse_dsl("A -> B : trigger\n").unwrap();
         measure_diagram(&mut d);
         layout_backbone(&mut d);

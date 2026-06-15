@@ -1,16 +1,16 @@
-import { DEFAULT_THEME, type Theme } from './themes';
+import { DEFAULT_THEME } from './themes';
 
 /** Read the `theme:` directive from a DSL document, defaulting to `DEFAULT_THEME`. */
-export function currentTheme(dsl: string): Theme {
+export function currentTheme(dsl: string): string {
   for (const line of dsl.split('\n')) {
     const m = line.match(/^\s*theme\s*:\s*(\S+)/i);
-    if (m) return m[1].toLowerCase() as Theme;
+    if (m) return m[1].toLowerCase();
   }
   return DEFAULT_THEME;
 }
 
 /** Return a copy of `dsl` with its `theme:` directive set to `theme`, inserting one if missing. */
-export function withTheme(dsl: string, theme: Theme): string {
+export function withTheme(dsl: string, theme: string): string {
   const lines = dsl.split('\n');
   const themeIdx = lines.findIndex((l) => /^\s*theme\s*:/i.test(l));
   if (themeIdx >= 0) {

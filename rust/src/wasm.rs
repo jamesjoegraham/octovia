@@ -8,7 +8,7 @@
 
 use wasm_bindgen::prelude::*;
 
-use crate::ast::{Theme, Viewport};
+use crate::ast::{resolve_theme, ThemeColors, Viewport};
 use crate::layout::layout_backbone;
 use crate::measure::measure_diagram;
 use crate::parser::{parse_dsl, parse_json};
@@ -21,7 +21,7 @@ use crate::svg_output::render_svg;
 /// * `dsl` - The text DSL string (sequence-first syntax).
 /// * `viewport_width` - Optional viewport width in pixels (default: 1200).
 /// * `viewport_height` - Optional viewport height in pixels (default: 800).
-/// * `theme` - Optional theme string: "transit", "ember", "forest", "light", "monochrome".
+/// * `theme` - Optional theme string. Any theme id from themes.json (e.g. "transit", "ember", "forest", "ocean").
 ///
 /// # Returns
 /// An SVG string, or a JS error.
@@ -44,8 +44,8 @@ pub fn render_from_dsl(
 
     // Override theme if provided
     if let Some(ref t) = theme {
-        diagram.theme = Theme::from_str(t)
-            .ok_or_else(|| JsError::new(&format!("Unknown theme: '{t}'. Options: transit, ember, forest, light, monochrome")))?;
+        diagram.theme = resolve_theme(t)
+            .ok_or_else(|| JsError::new(&format!("Unknown theme: '{t}'. See list_themes() for valid options.")))?;
     }
 
     run_pipeline(&mut diagram)

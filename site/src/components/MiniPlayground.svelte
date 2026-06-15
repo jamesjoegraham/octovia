@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { EXAMPLES, type ExampleName } from '../lib/examples';
-  import { THEMES, THEME_LABELS, type Theme } from '../lib/themes';
+  import { THEMES, THEME_LABELS } from '../lib/themes';
   import { currentTheme, withTheme } from '../lib/dsl';
 
   type RenderFn = (d: string, w?: number | null, h?: number | null) => string;
@@ -91,7 +91,7 @@
     doRender();
   }
 
-  function setTheme(id: Theme) {
+  function setTheme(id: string) {
     dsl = withTheme(dsl, id);
     doRender();
   }
@@ -124,15 +124,18 @@
       {/each}
     </div>
 
-    <div class="join ml-auto">
-      {#each THEMES as t (t)}
-        <button
-          type="button"
-          onclick={() => setTheme(t)}
-          title={THEME_LABELS[t]}
-          class="join-item btn btn-xs {theme === t ? 'btn-active' : 'btn-ghost'}"
-        >{THEME_LABELS[t]}</button>
-      {/each}
+    <!-- Theme picker (dropdown for all 46 themes) -->
+    <div class="flex items-center gap-1 ml-auto">
+      <span class="text-[10px] font-medium text-base-content/50 hidden sm:inline">Theme</span>
+      <select
+        class="select select-xs select-bordered max-w-[110px]"
+        value={theme}
+        onchange={(e) => { dsl = withTheme(dsl, e.currentTarget.value); doRender(); }}
+      >
+        {#each THEMES as t (t)}
+          <option value={t}>{THEME_LABELS[t]}</option>
+        {/each}
+      </select>
     </div>
   </div>
 

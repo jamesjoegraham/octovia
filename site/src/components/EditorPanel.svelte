@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { EXAMPLES, type ExampleName } from '../lib/examples';
-  import { THEMES, THEME_LABELS, type Theme } from '../lib/themes';
+  import { THEMES, THEME_LABELS } from '../lib/themes';
   import { currentTheme, withTheme } from '../lib/dsl';
 
   const BLANK = 'Blank' as const;
@@ -84,7 +84,7 @@
     render();
   }
 
-  function setTheme(id: Theme) {
+  function setTheme(id: string) {
     dsl = withTheme(dsl, id);
     render();
   }
@@ -190,14 +190,18 @@
 
     <div class="divider divider-horizontal mx-0"></div>
 
-    <div class="join gap-0">
-      {#each THEMES as t (t)}
-        <button
-          class="join-item btn btn-xs {theme === t ? 'btn-active' : 'btn-ghost'}"
-          onclick={() => setTheme(t)}
-          title={THEME_LABELS[t]}
-        >{THEME_LABELS[t]}</button>
-      {/each}
+    <!-- Theme dropdown -->
+    <div class="flex items-center gap-1">
+      <span class="text-[10px] font-medium text-base-content/50 hidden sm:inline">Theme</span>
+      <select
+        class="select select-xs select-bordered max-w-[120px]"
+        value={theme}
+        onchange={(e) => setTheme(e.currentTarget.value)}
+      >
+        {#each THEMES as t (t)}
+          <option value={t}>{THEME_LABELS[t]}</option>
+        {/each}
+      </select>
     </div>
 
     <div class="ml-auto">
