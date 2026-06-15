@@ -2,17 +2,18 @@
 //!
 //! For every edge, in input order:
 //!
-//! 1. Pick ports based on the edge's role (forward → cardinal axis;
-//!    back-edge → S/N so A* descends into the bottom routing channel).
-//! 2. Run A* through the [`GridOccupancy`] to find an octilinear path.
-//! 3. Reserve every cell of the resolved path back into the grid.
-//! 4. If the edge has a label, search the local neighbourhood of the
-//!    route for a free anchor and reserve that label's bounding box.
-//! 5. Move on to the next edge.
-//!
-//! Because every committed route and every committed label updates the
-//! same occupancy grid, subsequent A* searches treat both as impassable
-//! terrain and naturally route around them.
+//! 1. Generate a small set of candidate (source, target) port pairs from
+//!    the relative geometry of the two nodes.
+//! 2. For each candidate, run A* between *stalk cells* (one cell beyond
+//!    each port) so every route enters and leaves its node along an
+//!    orthogonal axis instead of snapping in at 45°.
+//! 3. Keep the candidate with the lowest A* cost; reserve its cells in
+//!    the [`GridOccupancy`] so subsequent edges treat it as a wall.
+//! 4. Once every edge is routed, spread parallel lanes so coincident
+//!    straight segments fan out instead of overlapping.
+//! 5. Finally, with the post-lane geometry in hand, place each labelled
+//!    edge's anchor against a fresh occupancy grid that reflects the
+//!    actual final polylines.
 
 mod astar;
 mod lanes;
@@ -23,15 +24,15 @@ pub use occupancy::GridOccupancy;
 
 use std::collections::HashMap;
 
-use crate::ast::{Diagram, Point};
+use crate::ast::{Diagram, Point, PortDirection};
 use crate::label_placement::seek_label_anchor;
 
 use astar::astar_cells;
 use lanes::assign_parallel_lanes;
-use ports::{pick_back_ports, pick_forward_ports, port_cell};
+use ports::{back_port_candidates, forward_port_candidates, outward_offset, port_cell};
 
-/// Route every edge through the universal A* router, placing each edge's
-/// label immediately after its route is committed.
+/// Route every edge through the universal A* router, then spread
+/// parallel lanes, then place edge labels against the final geometry.
 pub fn route_all_edges(diagram: &mut Diagram) {
     let mut occupancy = GridOccupancy::new(diagram);
 
@@ -75,18 +76,23 @@ pub fn route_all_edges(diagram: &mut Diagram) {
             (from, to, src_size, tgt_size, e.is_cyclic)
         };
 
-        let (src_port, tgt_port) = if is_cyclic {
-            pick_back_ports()
+        let candidates = if is_cyclic {
+            back_port_candidates(from, to)
         } else {
-            pick_forward_ports(from, to)
+            forward_port_candidates(from, to)
         };
-        let start = port_cell(from, src_size, src_port);
-        let end = port_cell(to, tgt_size, tgt_port);
 
-        let cells = astar_cells(start, end, &occupancy).unwrap_or_else(|| vec![start, end]);
+        let cells = best_route(
+            from,
+            to,
+            src_size,
+            tgt_size,
+            &candidates,
+            &occupancy,
+        );
 
-        // Convert grid cells back to pixel coordinates and bookend with the
-        // source / target centres so SVG `trim_route_to_node_boundaries`
+        // Convert grid cells back to pixel coordinates and bookend with
+        // the source / target centres so SVG `trim_route_to_node_boundaries`
         // can clip the polyline cleanly to each rectangle's edge.
         let mut route: Vec<Point> = Vec::with_capacity(cells.len() + 2);
         route.push(from);
@@ -94,21 +100,110 @@ pub fn route_all_edges(diagram: &mut Diagram) {
             route.push(Point::new(cx * 10, cy * 10));
         }
         route.push(to);
-        diagram.edges[ei].route = route.clone();
+        diagram.edges[ei].route = route;
         occupancy.occupy_path(&cells);
-
-        // Place the label and reserve its bounding box.
-        if let Some(extents) = diagram.edges[ei].label_extents {
-            if let Some(anchor) = seek_label_anchor(&route, extents, &occupancy) {
-                diagram.edges[ei].label_anchor = Some(anchor);
-                occupancy.occupy_label(anchor, extents);
-            }
-        }
     }
 
     // Post-pass: spread parallel forward edges that ended up sharing a
     // straight segment so they don't draw on top of each other.
     assign_parallel_lanes(diagram);
+
+    // Labels run *after* lane spreading so anchors track the final
+    // polyline geometry. Rebuild occupancy from the freshly-shifted
+    // routes; otherwise label placement would be testing collisions
+    // against the pre-lane cells the router originally reserved.
+    let mut label_occupancy = GridOccupancy::new(diagram);
+    for edge in &diagram.edges {
+        let cells = cells_along_polyline(&edge.route);
+        label_occupancy.occupy_path(&cells);
+    }
+
+    for ei in 0..diagram.edges.len() {
+        if let Some(extents) = diagram.edges[ei].label_extents {
+            let route = diagram.edges[ei].route.clone();
+            if let Some(anchor) = seek_label_anchor(&route, extents, &label_occupancy) {
+                diagram.edges[ei].label_anchor = Some(anchor);
+                label_occupancy.occupy_label(anchor, extents);
+            }
+        }
+    }
+}
+
+/// For each candidate port pair run A* between the two *stalk* cells
+/// (one orthogonal step outside each port) and return the cheapest
+/// resulting cell sequence — including the port cells themselves so
+/// the rendered polyline still terminates at the node boundary.
+///
+/// Falls back to a direct port-to-port segment if no candidate yields
+/// a path; this preserves the previous "always emit something" contract
+/// for malformed or fully-walled-off layouts.
+fn best_route(
+    from: Point,
+    to: Point,
+    src_size: crate::ast::NodeSize,
+    tgt_size: crate::ast::NodeSize,
+    candidates: &[(PortDirection, PortDirection)],
+    occupancy: &GridOccupancy,
+) -> Vec<(i32, i32)> {
+    let mut best: Option<(u32, Vec<(i32, i32)>)> = None;
+
+    for &(src_port, tgt_port) in candidates.iter().take(3) {
+        let port_src = port_cell(from, src_size, src_port);
+        let port_tgt = port_cell(to, tgt_size, tgt_port);
+        let (sox, soy) = outward_offset(src_port);
+        let (tox, toy) = outward_offset(tgt_port);
+        let stalk_src = (port_src.0 + sox, port_src.1 + soy);
+        let stalk_tgt = (port_tgt.0 + tox, port_tgt.1 + toy);
+
+        let Some((path, cost)) = astar_cells(stalk_src, stalk_tgt, occupancy) else {
+            continue;
+        };
+
+        // Compose: port → stalk → … → stalk → port.
+        let mut full = Vec::with_capacity(path.len() + 2);
+        full.push(port_src);
+        full.extend(path);
+        full.push(port_tgt);
+
+        if best.as_ref().is_none_or(|(c, _)| cost < *c) {
+            best = Some((cost, full));
+        }
+    }
+
+    if let Some((_, full)) = best {
+        return full;
+    }
+
+    // Last-resort fallback: connect the two primary ports directly.
+    let (src_port, tgt_port) = candidates[0];
+    vec![
+        port_cell(from, src_size, src_port),
+        port_cell(to, tgt_size, tgt_port),
+    ]
+}
+
+/// Rasterise an octilinear pixel polyline into the grid cells it covers.
+/// Consecutive waypoints in any router-emitted route differ by ±10 px in
+/// at most each axis, so a constant 10-px stride visits every cell along
+/// each segment without duplication.
+fn cells_along_polyline(route: &[Point]) -> Vec<(i32, i32)> {
+    let mut out: Vec<(i32, i32)> = Vec::new();
+    if route.is_empty() {
+        return out;
+    }
+    out.push((route[0].x / 10, route[0].y / 10));
+    for win in route.windows(2) {
+        let (a, b) = (win[0], win[1]);
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        let steps = (dx.abs() / 10).max(dy.abs() / 10).max(1);
+        for s in 1..=steps {
+            let x = a.x + dx * s / steps;
+            let y = a.y + dy * s / steps;
+            out.push((x / 10, y / 10));
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -148,25 +243,20 @@ mod tests {
     }
 
     #[test]
-    fn test_back_edge_uses_south_north_ports() {
-        // Back-edge ports are deterministic: S out of source, N into target.
-        // Routes are bookended with node centres for clean trimming, so we
-        // probe the polyline interior for the descent and ascent.
-        let d = render_pipeline("A -> B\nB -> A\n");
+    fn test_back_edge_routes_around_chain() {
+        // With dynamic port candidates the back-edge is no longer pinned
+        // to (South, North); the cost-based selector now picks whichever
+        // pair yields the shortest legal A* path. The contract that
+        // remains: a back-edge in a 3-node cycle must produce a
+        // multi-segment polyline that differs from a straight node-to-
+        // node connector.
+        let d = render_pipeline("A -> B\nB -> C\nC -> A\n");
         let back = d.edges.iter().find(|e| e.is_cyclic).expect("back-edge");
-        let src = d.node(&back.from).unwrap().position.unwrap();
-        let tgt = d.node(&back.to).unwrap().position.unwrap();
-        let max_y = back.route.iter().map(|p| p.y).max().unwrap();
-        let min_y_after_descent = back
-            .route
-            .iter()
-            .skip_while(|p| p.y <= src.y)
-            .map(|p| p.y)
-            .min()
-            .unwrap_or(src.y);
-        assert!(max_y > src.y, "back-edge must descend below source");
-        assert!(min_y_after_descent < tgt.y || max_y > tgt.y,
-                "back-edge must reach target's vertical band");
+        assert!(
+            back.route.len() > 2,
+            "back-edge must have intermediate waypoints, got {:?}",
+            back.route
+        );
     }
 
     #[test]

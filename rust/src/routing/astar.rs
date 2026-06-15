@@ -10,7 +10,9 @@ use pathfinding::prelude::astar;
 
 use super::occupancy::GridOccupancy;
 
-/// Run A* between two cells using the octilinear cost function.
+/// Run A* between two cells using the octilinear cost function. Returns
+/// both the cell path and its accumulated cost so callers can compare
+/// alternative port pairings and pick the cheapest route.
 ///
 /// Neighbour expansion is bounded by the occupancy grid's world
 /// rectangle so the search is always finite, even when the goal is
@@ -19,7 +21,7 @@ pub(crate) fn astar_cells(
     start: (i32, i32),
     end: (i32, i32),
     occupancy: &GridOccupancy,
-) -> Option<Vec<(i32, i32)>> {
+) -> Option<(Vec<(i32, i32)>, u32)> {
     astar(
         &start,
         |&cell| {
@@ -36,7 +38,6 @@ pub(crate) fn astar_cells(
         |&cell| octile_distance(cell, end),
         |&cell| cell == end,
     )
-    .map(|(path, _cost)| path)
 }
 
 /// Heuristic: octile distance (Chebyshev with diagonal cost √2 ≈ 14/10).

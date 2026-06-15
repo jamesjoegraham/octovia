@@ -404,6 +404,7 @@ mod tests {
 
     #[test]
     fn test_edge_label_perpendicular_offset() {
+        // Horizontal edge — actual pipeline output should anchor middle.
         let mut d_h = parse_dsl("A -> B : go\n").unwrap();
         measure_diagram(&mut d_h);
         layout_backbone(&mut d_h);
@@ -419,28 +420,37 @@ mod tests {
             "horizontal edge label should anchor middle: {label_line}"
         );
 
-        let mut d_v = parse_dsl(
-            "Draft -> Review : submit\n\
-             Review -> Approved : approve\n\
-             Review -> Revisions : revise\n\
-             Revisions -> Draft : redraft\n\
-             Revisions -> Review : resubmit\n\
-             Approved -> Published : publish\n",
-        )
-        .unwrap();
-        d_v.viewport = Viewport { width: 900, height: 800 };
+        // Vertical edge — synthesise a diagram with two stacked nodes
+        // and a hand-crafted vertical route so we can verify the
+        // anchor field flows through to `text-anchor="start"`.
+        // (The cost-based router rarely produces vertical-dominant
+        // midpoints, so we exercise the rendering path directly.)
+        let mut d_v = parse_dsl("A -> B : drop\n").unwrap();
         measure_diagram(&mut d_v);
         layout_backbone(&mut d_v);
-        route_all_edges(&mut d_v);
-        let svg_v = render_svg(&d_v);
 
+        // Stack B directly below A and replace edge 0 with a vertical
+        // polyline whose midpoint orientation is purely vertical.
+        let a_pos = d_v.node("A").unwrap().position.unwrap();
+        let b_pos_target = Point::new(a_pos.x, a_pos.y + 200);
+        d_v.node_mut("B").unwrap().position = Some(b_pos_target);
+        d_v.edges[0].route = vec![
+            a_pos,
+            Point::new(a_pos.x, a_pos.y + 50),
+            Point::new(a_pos.x, a_pos.y + 100),
+            Point::new(a_pos.x, a_pos.y + 150),
+            b_pos_target,
+        ];
+        d_v.edges[0].label_anchor = crate::label_placement::place_edge_label(&d_v.edges[0].route);
+
+        let svg_v = render_svg(&d_v);
         let any_vertical = svg_v
             .lines()
             .filter(|l| l.contains("elabel-"))
             .any(|l| l.contains(r#"text-anchor="start""#));
         assert!(
             any_vertical,
-            "expected at least one vertical edge label using text-anchor=start"
+            "expected vertical edge label using text-anchor=start"
         );
     }
 

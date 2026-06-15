@@ -250,10 +250,10 @@ forward edge        cyclic / back-edge
                                  └──────┘
 ```
 
-* **Forward edges** — `pick_forward_ports(from, to)` picks ports per dominant axis: same column → S/N, same row → E/W, otherwise dominant of |Δx|, |Δy|.
-* **Back-edges** — `pick_back_ports()` is fixed: source **South**, target **North**. A* descends into the bottom routing channel.
+* **Forward edges** — `forward_port_candidates(from, to)` returns three ranked (src, tgt) pairs: the dominant-axis primary plus two perpendicular alternates that share the natural target port. The router runs A* for each and keeps the cheapest path.
+* **Back-edges** — `back_port_candidates(from, to)` returns three ranked pairs all entering the target via **North**, exiting either **South** (canonical wrap), **East**, or **West** depending on which side of the source the target sits on.
 
-Ports are placed one cell *outside* the node block so the A* search can move freely around the perimeter.
+Ports are placed one cell *outside* the node block. To prevent diagonal A* moves from snapping into a node port at 45°, the search itself runs between **stalk cells** — one further cell along the port's outward axis — and the rendered polyline prepends/appends the port cell, giving every route a 1-cell orthogonal entry and exit.
 
 ### 4c — A* (`src/routing/astar.rs`)
 
@@ -268,42 +268,52 @@ $$
 h(a, b) \;=\; (|\Delta x| + |\Delta y| - d) \cdot 10 + d \cdot 14, \qquad d = \min(|\Delta x|, |\Delta y|)
 $$
 
-Neighbours are emitted in a fixed order (E, W, S, N, NE, NW, SE, SW) so ties are broken deterministically. The endpoints `start` and `end` always satisfy `is_free`, regardless of node/edge/label state, so a route always exists from a port to its goal.
+Neighbours are emitted in a fixed order (E, W, S, N, NE, NW, SE, SW) so ties are broken deterministically. The endpoints `start` and `end` always satisfy `is_free`, regardless of node/edge/label state, so a route always exists from a port to its goal. `astar_cells` returns both the path and its accumulated cost so the routing loop can compare candidate port pairs.
 
 ### 4d — The unified loop (`src/routing/mod.rs`)
 
 ```rust
 let mut occupancy = GridOccupancy::new(diagram);
+
+// Pass 1 — route every edge, lowest-cost candidate wins.
 for ei in forward_edges_then_back_edges {
-    let (src_port, tgt_port) = ports_for(edge);
-    let start = port_cell(from_centre, src_size, src_port);
-    let end   = port_cell(to_centre,   tgt_size, tgt_port);
+    let candidates = if edge.is_cyclic {
+        back_port_candidates(from_centre, to_centre)
+    } else {
+        forward_port_candidates(from_centre, to_centre)
+    };
+    let cells = best_route(from_centre, to_centre, src_size, tgt_size,
+                           &candidates, &occupancy);
 
-    let cells = astar_cells(start, end, &occupancy)
-        .unwrap_or_else(|| vec![start, end]);
-
-    // Bookend with node centres so the SVG trimmer can cleanly clip
-    // the polyline to each rectangle's edge.
     let route = [from_centre]
         ++ cells.iter().map(|(cx,cy)| Point::new(cx*10, cy*10))
         ++ [to_centre];
-
-    edge.route = route.clone();
+    edge.route = route;
     occupancy.occupy_path(&cells);
+}
 
+// Pass 2 — spread genuinely co-linear forward edges.
+assign_parallel_lanes(diagram);
+
+// Pass 3 — labels run last, against a fresh occupancy rebuilt from
+// the post-lane geometry so anchors track the final polyline.
+let mut label_occupancy = GridOccupancy::new(diagram);
+for edge in &diagram.edges {
+    label_occupancy.occupy_path(&cells_along_polyline(&edge.route));
+}
+for edge in &mut diagram.edges {
     if let Some(extents) = edge.label_extents {
-        if let Some(anchor) = seek_label_anchor(&route, extents, &occupancy) {
-            edge.label_anchor = Some(anchor);
-            occupancy.occupy_label(anchor, extents);
+        edge.label_anchor = seek_label_anchor(&edge.route, extents, &label_occupancy);
+        if let Some(a) = edge.label_anchor {
+            label_occupancy.occupy_label(a, extents);
         }
     }
 }
-assign_parallel_lanes(diagram);   // post-pass: spread genuinely co-linear edges
 ```
 
-Forward edges are processed before back-edges so back-edges naturally route around already-committed forward routes.
+`best_route` runs A* between the **stalk** cells of each candidate port pair (one cell beyond the port along its outward axis) and returns the cell sequence — including the port cells themselves — for the cheapest candidate. Forward edges are processed before back-edges so back-edges naturally route around already-committed forward routes.
 
-After every route is laid down, `seek_label_anchor` searches the route's local neighbourhood for a non-colliding label position (probing each waypoint, then a fan of perpendicular offsets at multiple magnitudes). The chosen anchor's bounding box is then written into `label_cells`, so subsequent edges and labels treat that label as a wall.
+Routing labels *after* the lane spreading pass is critical: the lane pass shifts straight segments by one grid cell, and if labels were placed first they would no longer track the edge they belong to. Pass 3 rebuilds the occupancy grid from the actual final polylines so each label avoids both nodes and the (possibly shifted) edges, then writes its bounding box into `label_cells` so subsequent labels avoid each other.
 
 The **lanes** post-pass (`src/routing/lanes.rs`) handles the rare case where two or more forward edges end up perfectly co-linear (same fixed `x` or `y` over an overlapping span); each is shifted one cell perpendicular with 45° connectors at the ends.
 
