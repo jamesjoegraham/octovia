@@ -1,298 +1,326 @@
-//! Backbone Layout Phase (Phase 2).
+//! Layered Topological Layout (lightweight Sugiyama).
 //!
-//! Extracts the spanning tree (main happy path) and lays it out
-//! using boustrophedon folding: a serpentine traversal that wraps
-//! nodes to optimally fill the user-provided viewport.
+//! Replaces the previous boustrophedon serpentine grid with a
+//! depth-stratified placement:
 //!
-//! Octilinear aesthetic: nodes are placed on an integer grid with
-//! uniform spacing. Only 0°, 45°, 90°, 135°, etc. connections.
+//! 1. Classify back-edges via DFS so the remaining graph is a DAG.
+//! 2. Assign each node a layer `L(v)` via longest-path topological sort.
+//! 3. Within each layer, stack nodes vertically in input order.
+//! 4. Map layers → columns and row-indices → rows on a pixel grid, with
+//!    explicit gutters between adjacent layers and rows. The gutters are
+//!    the routing channels A* uses for forward and back-edges.
+//!
+//! The result is that *time flows left-to-right structurally*: every
+//! forward edge `e = (u, v)` satisfies `L(u) < L(v)`, every back-edge
+//! satisfies `L(u) >= L(v)`.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use crate::ast::{Diagram, Point, Viewport};
-use crate::measure::MAX_NODE_WIDTH;
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-/// Horizontal spacing between adjacent nodes on the grid.
-pub const GRID_SPACING_X: i32 = 200;
+/// Horizontal gutter (px) between adjacent layer columns. This is the
+/// dedicated routing channel A* uses for forward and back-edge passes.
+pub const LAYER_GUTTER: i32 = 90;
 
-/// Vertical spacing between rows.
-pub const GRID_SPACING_Y: i32 = 150;
+/// Vertical gutter (px) between adjacent rows.
+pub const ROW_GUTTER: i32 = 70;
+
+/// Outer margin around the diagram bounding box.
+pub const MARGIN: i32 = 50;
 
 /// Half-side of the smallest node; fallback when no node_size is set.
 pub const NODE_RADIUS: i32 = 30;
 
-/// Minimum viewport edge to avoid degenerate layouts.
-const MIN_VIEWPORT: u32 = 400;
-
 // ---------------------------------------------------------------------------
-// Spanning tree extraction
+// Back-edge classification (DFS)
 // ---------------------------------------------------------------------------
 
-/// Extract the main "happy path" spanning tree from the diagram.
-///
-/// Uses a BFS from the first node in insertion order (assumed root).
-/// Returns an ordered list of node IDs in traversal order.
-pub fn extract_spanning_tree(diagram: &Diagram) -> Vec<String> {
-    if diagram.nodes.is_empty() {
-        return Vec::new();
-    }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Color {
+    White,
+    Gray,
+    Black,
+}
 
-    // Build adjacency from the directed edges
-    let mut forward: HashMap<&str, Vec<&str>> = HashMap::new();
-    let mut reverse: HashMap<&str, Vec<&str>> = HashMap::new();
-
-    for edge in &diagram.edges {
-        forward.entry(edge.from.as_str()).or_default().push(edge.to.as_str());
-        reverse.entry(edge.to.as_str()).or_default().push(edge.from.as_str());
-    }
-
-    // Root heuristics: prefer node with no in-edges, else first node
-    let root = diagram
+/// Identify back-edges: edges that close a cycle when the graph is DFS'd
+/// in node insertion order. The set returned is a valid feedback arc set
+/// — removing them leaves a DAG that we can topologically sort.
+fn classify_back_edges(diagram: &Diagram) -> HashSet<usize> {
+    let n = diagram.nodes.len();
+    let id_to_idx: HashMap<&str, usize> = diagram
         .nodes
         .iter()
-        .find(|n| !reverse.contains_key(n.id.as_str()))
-        .map(|n| n.id.as_str())
-        .unwrap_or(diagram.nodes[0].id.as_str());
+        .enumerate()
+        .map(|(i, n)| (n.id.as_str(), i))
+        .collect();
 
-    // BFS to produce an ordered spanning tree
-    let mut visited: HashSet<&str> = HashSet::new();
-    let mut order: Vec<String> = Vec::new();
-    let mut queue: VecDeque<&str> = VecDeque::new();
+    // Edges out of each node, recorded by their *edge index* so the result
+    // points back into `diagram.edges`.
+    let mut adj: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n];
+    for (ei, edge) in diagram.edges.iter().enumerate() {
+        if let (Some(&fi), Some(&ti)) =
+            (id_to_idx.get(edge.from.as_str()), id_to_idx.get(edge.to.as_str()))
+        {
+            adj[fi].push((ti, ei));
+        }
+    }
 
-    queue.push_back(root);
-    visited.insert(root);
+    let mut color = vec![Color::White; n];
+    let mut back: HashSet<usize> = HashSet::new();
 
-    while let Some(id) = queue.pop_front() {
-        order.push(id.to_string());
-
-        if let Some(neighbors) = forward.get(id) {
-            for next in neighbors {
-                if visited.insert(next) {
-                    queue.push_back(next);
+    // Iterative DFS to avoid Rust's stack-overflow risk on deep graphs.
+    for start in 0..n {
+        if color[start] != Color::White {
+            continue;
+        }
+        let mut stack: Vec<(usize, usize)> = vec![(start, 0)];
+        color[start] = Color::Gray;
+        while let Some(&(u, i)) = stack.last() {
+            if let Some(&(v, ei)) = adj[u].get(i) {
+                stack.last_mut().unwrap().1 += 1;
+                match color[v] {
+                    Color::White => {
+                        color[v] = Color::Gray;
+                        stack.push((v, 0));
+                    }
+                    Color::Gray => {
+                        // Back-edge (also catches self-loops where u == v).
+                        back.insert(ei);
+                    }
+                    Color::Black => {
+                        // Cross / forward edge — keep in the DAG.
+                    }
                 }
+            } else {
+                color[u] = Color::Black;
+                stack.pop();
             }
         }
     }
 
-    // If a topology-first BFS missed disconnected stragglers, append them
-    for node in &diagram.nodes {
-        if !visited.contains(node.id.as_str()) {
-            visited.insert(node.id.as_str());
-            order.push(node.id.clone());
-        }
-    }
-
-    order
+    back
 }
 
 // ---------------------------------------------------------------------------
-// Boustrophedon grid placement
+// Longest-path layer assignment
 // ---------------------------------------------------------------------------
 
-/// Place nodes on the grid using a serpentine (boustrophedon) row layout.
-///
-/// The spanning tree is laid out left-to-right on the first row, then
-/// right-to-left on the second (like an ox ploughing a field), wrapping
-/// at a row width computed from the viewport.
-///
-/// Returns a map of node ID -> grid position.
-pub fn place_backbone(
-    spanning_order: &[String],
-    viewport: &Viewport,
-) -> HashMap<String, Point> {
-    if spanning_order.is_empty() {
-        return HashMap::new();
-    }
-
-    let vw = viewport.width.max(MIN_VIEWPORT) as i32;
-
-    // Estimate maximum node half-width from the text cap + padding.
-    let node_half_w = (MAX_NODE_WIDTH as i32 + 24) / 2;
-
-    // Compute how many nodes fit per row.
-    let usable_width = vw - 4 * node_half_w;
-    let per_row = ((usable_width / GRID_SPACING_X).max(1)) as usize;
-
-    let mut positions = HashMap::new();
-
-    for (idx, node_id) in spanning_order.iter().enumerate() {
-        let row = idx / per_row;
-        let col = idx % per_row;
-
-        // Boustrophedon: even rows go left-to-right, odd rows go right-to-left
-        let x = if row % 2 == 0 {
-            node_half_w + (col as i32) * GRID_SPACING_X
-        } else {
-            // Right-to-left: compute from the right edge
-            node_half_w + ((per_row - 1 - col) as i32) * GRID_SPACING_X
-        };
-
-        let y = node_half_w + (row as i32) * GRID_SPACING_Y;
-
-        positions.insert(node_id.clone(), Point::new(x, y));
-    }
-
-    positions
-}
-
-// ---------------------------------------------------------------------------
-// Phase 2 entry point
-// ---------------------------------------------------------------------------
-
-/// Run the backbone layout: extract spanning tree and place nodes.
-///
-/// Mutates the Diagram in place, setting each node's `position`.
-pub fn layout_backbone(diagram: &mut Diagram) {
-    let spanning = extract_spanning_tree(diagram);
-    let positions = place_backbone(&spanning, &diagram.viewport);
-
-    // Tag nodes with their spanning index and grid position
-    for (idx, node_id) in spanning.iter().enumerate() {
-        if let Some(node) = diagram.node_mut(node_id) {
-            node.spanning_index = Some(idx);
-            node.position = positions.get(node_id).copied();
-        }
-    }
-
-    // Tag cyclic edges — any edge where the destination is earlier in the
-    // spanning tree than the source (or on a different branch) is cyclic.
-    let order_map: HashMap<&str, usize> = spanning
+/// Compute layer indices via longest-path topological sort over the DAG
+/// formed by every non-back edge. Disconnected components share layer
+/// indices — they all start at layer 0.
+fn compute_layers(diagram: &Diagram, back: &HashSet<usize>) -> HashMap<String, i32> {
+    let n = diagram.nodes.len();
+    let id_to_idx: HashMap<&str, usize> = diagram
+        .nodes
         .iter()
         .enumerate()
-        .map(|(i, id)| (id.as_str(), i))
+        .map(|(i, node)| (node.id.as_str(), i))
         .collect();
 
-    for edge in &mut diagram.edges {
-        let is_cyclic = match (order_map.get(edge.from.as_str()), order_map.get(edge.to.as_str())) {
-            (Some(&fi), Some(&ti)) => fi >= ti, // back-edge or self-loop
-            _ => true, // reference to un-indexed node → cyclic
-        };
-        edge.is_cyclic = is_cyclic;
+    let mut forward_adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+    let mut in_deg: Vec<usize> = vec![0; n];
+    for (ei, edge) in diagram.edges.iter().enumerate() {
+        if back.contains(&ei) {
+            continue;
+        }
+        if let (Some(&fi), Some(&ti)) =
+            (id_to_idx.get(edge.from.as_str()), id_to_idx.get(edge.to.as_str()))
+        {
+            // Skip self-edges defensively (DFS already classifies them as back).
+            if fi == ti {
+                continue;
+            }
+            forward_adj[fi].push(ti);
+            in_deg[ti] += 1;
+        }
     }
+
+    let mut layer: Vec<i32> = vec![0; n];
+    let mut queue: VecDeque<usize> = VecDeque::new();
+    // Seed in node insertion order for determinism.
+    for i in 0..n {
+        if in_deg[i] == 0 {
+            queue.push_back(i);
+        }
+    }
+
+    while let Some(u) = queue.pop_front() {
+        for &v in &forward_adj[u] {
+            let candidate = layer[u] + 1;
+            if candidate > layer[v] {
+                layer[v] = candidate;
+            }
+            in_deg[v] -= 1;
+            if in_deg[v] == 0 {
+                queue.push_back(v);
+            }
+        }
+    }
+
+    diagram
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(i, node)| (node.id.clone(), layer[i]))
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Coordinate placement
+// ---------------------------------------------------------------------------
+
+/// Final entry point: classify cycles, assign layers, place nodes on the
+/// pixel grid. Mutates `diagram.nodes[*].position` and `diagram.edges[*].is_cyclic`.
+pub fn layout_backbone(diagram: &mut Diagram) {
+    if diagram.nodes.is_empty() {
+        return;
+    }
+
+    let back = classify_back_edges(diagram);
+    let layers = compute_layers(diagram, &back);
+
+    // Bucket node indices by layer in input order.
+    let mut groups: BTreeMap<i32, Vec<usize>> = BTreeMap::new();
+    for (i, node) in diagram.nodes.iter().enumerate() {
+        let l = layers.get(&node.id).copied().unwrap_or(0);
+        groups.entry(l).or_default().push(i);
+    }
+
+    // Per-layer column width = max node width in that layer.
+    // Per-row height        = max node height across all layers at that row index.
+    let max_rows = groups.values().map(|g| g.len()).max().unwrap_or(0);
+    let mut layer_widths: BTreeMap<i32, i32> = BTreeMap::new();
+    let mut row_heights: Vec<i32> = vec![0; max_rows];
+    for (&l, indices) in &groups {
+        let mut max_w = 2 * NODE_RADIUS;
+        for (row, &i) in indices.iter().enumerate() {
+            let size = diagram.nodes[i]
+                .node_size
+                .unwrap_or(crate::ast::NodeSize { width: 60, height: 60 });
+            if size.width > max_w {
+                max_w = size.width;
+            }
+            if size.height > row_heights[row] {
+                row_heights[row] = size.height;
+            }
+        }
+        layer_widths.insert(l, max_w);
+    }
+
+    // Cumulative x-centres for each layer.
+    let mut x_centre: HashMap<i32, i32> = HashMap::new();
+    let mut cursor = MARGIN;
+    for (&l, _) in &groups {
+        let w = layer_widths[&l];
+        cursor += w / 2;
+        x_centre.insert(l, cursor);
+        cursor += (w - w / 2) + LAYER_GUTTER;
+    }
+
+    // Cumulative y-centres for each row index.
+    let mut y_centre: Vec<i32> = vec![0; max_rows];
+    let mut yc = MARGIN;
+    for r in 0..max_rows {
+        let h = row_heights[r];
+        yc += h / 2;
+        y_centre[r] = yc;
+        yc += (h - h / 2) + ROW_GUTTER;
+    }
+
+    // Apply positions.
+    for (&l, indices) in &groups {
+        for (row, &i) in indices.iter().enumerate() {
+            let pos = Point::new(*x_centre.get(&l).unwrap_or(&MARGIN), y_centre[row]);
+            diagram.nodes[i].position = Some(pos);
+            diagram.nodes[i].spanning_index = Some(l as usize);
+        }
+    }
+
+    // Tag edges with their cyclic status.
+    for (ei, edge) in diagram.edges.iter_mut().enumerate() {
+        edge.is_cyclic = back.contains(&ei);
+    }
+
+    // Viewport is informational only; layout is now fully label-driven.
+    let _ = Viewport::default();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::measure::measure_diagram;
     use crate::parser::parse_dsl;
 
     #[test]
-    fn test_spanning_tree_linear() {
-        let d = parse_dsl("A -> B : x\nB -> C : y\n").unwrap();
-        let tree = extract_spanning_tree(&d);
-        assert_eq!(tree, vec!["A", "B", "C"]);
-    }
-
-    #[test]
-    fn test_spanning_tree_single_node() {
-        let d = parse_dsl("Solo -> Solo\n").unwrap();
-        let tree = extract_spanning_tree(&d);
-        assert_eq!(tree.len(), 1);
-        assert_eq!(tree[0], "Solo");
-    }
-
-    #[test]
-    fn test_spanning_tree_empty() {
-        let d = parse_dsl("").unwrap();
-        let tree = extract_spanning_tree(&d);
-        assert!(tree.is_empty());
-    }
-
-    #[test]
-    fn test_spanning_tree_disconnected() {
-        let d = parse_dsl("A -> B\nX -> Y\n").unwrap();
-        let tree = extract_spanning_tree(&d);
-        // BFS root is the first node in the node list (HashMap iteration).
-        // Both A and X have no in-edges.
-        // All 4 nodes must appear in the spanning tree.
-        assert_eq!(tree.len(), 4);
-        assert!(tree.contains(&"A".to_string()));
-        assert!(tree.contains(&"B".to_string()));
-        assert!(tree.contains(&"X".to_string()));
-        assert!(tree.contains(&"Y".to_string()));
-        // Should form two connected sub-sequences
-        let a_pos = tree.iter().position(|s| s == "A").unwrap();
-        let b_pos = tree.iter().position(|s| s == "B").unwrap();
-        let x_pos = tree.iter().position(|s| s == "X").unwrap();
-        let y_pos = tree.iter().position(|s| s == "Y").unwrap();
-        // A and B must be adjacent in the sequence (BFS from one root)
-        assert!((a_pos as isize - b_pos as isize).abs() == 1);
-        // X and Y must be adjacent
-        assert!((x_pos as isize - y_pos as isize).abs() == 1);
-    }
-
-    #[test]
-    fn test_boustrophedon_placement() {
-        let tree: Vec<String> = (0..10).map(|i| format!("S{i}")).collect();
-        let viewport = Viewport {
-            width: 1200,
-            height: 600,
-        };
-        let positions = place_backbone(&tree, &viewport);
-
-        let node_half_w = (MAX_NODE_WIDTH as i32 + 24) / 2;
-        assert_eq!(positions.get("S0").unwrap().x, node_half_w);
-        assert_eq!(
-            positions.get("S1").unwrap().x,
-            node_half_w + GRID_SPACING_X
-        );
-        assert!(positions.len() == 10);
-        // All positions should be non-negative
-        for id in &tree {
-            let p = positions.get(id.as_str()).unwrap();
-            assert!(p.x >= 0);
-            assert!(p.y >= 0);
-        }
-    }
-
-    #[test]
-    fn test_boustrophedon_single_node() {
-        let tree: Vec<String> = vec!["Alone".into()];
-        let viewport = Viewport::default();
-        let positions = place_backbone(&tree, &viewport);
-        let p = positions.get("Alone").unwrap();
-        let node_half_w = (MAX_NODE_WIDTH as i32 + 24) / 2;
-        assert_eq!(p.x, node_half_w);
-        assert_eq!(p.y, node_half_w);
-    }
-
-    #[test]
-    fn test_boustrophedon_tiny_viewport() {
-        let tree: Vec<String> = (0..5).map(|i| format!("N{i}")).collect();
-        let viewport = Viewport { width: 100, height: 100 };
-        let positions = place_backbone(&tree, &viewport);
-        // Tiny viewport → per_row should be at least 1
-        assert!(positions.len() == 5);
-        // Each node is placed at a valid coordinate
-        for id in &tree {
-            let p = positions.get(id.as_str()).unwrap();
-            assert!(p.x >= 0);
-            assert!(p.y >= 0);
-        }
-    }
-
-    #[test]
-    fn test_layout_backbone_tags_cyclic_edges() {
-        let mut d = parse_dsl("A -> B\nB -> C\nC -> A\n").unwrap();
+    fn test_layered_linear_chain() {
+        let mut d = parse_dsl("A -> B\nB -> C\n").unwrap();
+        measure_diagram(&mut d);
         layout_backbone(&mut d);
-        // In a 3-node cycle, at least one edge should be cyclic
-        assert!(d.edges.iter().any(|e| e.is_cyclic), "no cyclic edge tagged");
-        // Only one edge should be cyclic (the back-edge)
-        let cyclic_count = d.edges.iter().filter(|e| e.is_cyclic).count();
-        assert_eq!(cyclic_count, 1, "expected exactly 1 cyclic edge in a 3-node cycle");
+        let xa = d.node("A").unwrap().position.unwrap().x;
+        let xb = d.node("B").unwrap().position.unwrap().x;
+        let xc = d.node("C").unwrap().position.unwrap().x;
+        assert!(xa < xb && xb < xc, "linear chain must flow left-to-right");
     }
 
     #[test]
-    fn test_layout_backbone_positions() {
-        // Need three separate edges: X->Y, Y->Z
-        let mut d2 = parse_dsl("X -> Y\nY -> Z\n").unwrap();
-        layout_backbone(&mut d2);
-        for node in &d2.nodes {
-            assert!(node.position.is_some(), "Node {} has no position", node.id);
+    fn test_layered_back_edge_classified() {
+        let mut d = parse_dsl("A -> B\nB -> C\nC -> A\n").unwrap();
+        measure_diagram(&mut d);
+        layout_backbone(&mut d);
+        let cyclic_count = d.edges.iter().filter(|e| e.is_cyclic).count();
+        assert_eq!(cyclic_count, 1);
+        let back = d.edges.iter().find(|e| e.is_cyclic).unwrap();
+        assert_eq!(back.from, "C");
+        assert_eq!(back.to, "A");
+    }
+
+    #[test]
+    fn test_layered_branch_stacks_vertically() {
+        let mut d = parse_dsl("A -> B\nA -> C\n").unwrap();
+        measure_diagram(&mut d);
+        layout_backbone(&mut d);
+        let pa = d.node("A").unwrap().position.unwrap();
+        let pb = d.node("B").unwrap().position.unwrap();
+        let pc = d.node("C").unwrap().position.unwrap();
+        // B and C are both successors of A — same layer, distinct rows.
+        assert_eq!(pb.x, pc.x);
+        assert_ne!(pb.y, pc.y);
+        assert!(pa.x < pb.x);
+    }
+
+    #[test]
+    fn test_layered_disconnected_components() {
+        let mut d = parse_dsl("A -> B\nX -> Y\n").unwrap();
+        measure_diagram(&mut d);
+        layout_backbone(&mut d);
+        for node in &d.nodes {
+            assert!(node.position.is_some(), "node {} must have a position", node.id);
         }
+    }
+
+    #[test]
+    fn test_layered_self_loop_no_crash() {
+        let mut d = parse_dsl("A -> A : retry\n").unwrap();
+        measure_diagram(&mut d);
+        layout_backbone(&mut d);
+        assert_eq!(d.edges.iter().filter(|e| e.is_cyclic).count(), 1);
+    }
+
+    #[test]
+    fn test_layered_diamond_with_cycle() {
+        let mut d = parse_dsl("A -> B\nB -> D\nA -> C\nC -> D\nD -> A\n").unwrap();
+        measure_diagram(&mut d);
+        layout_backbone(&mut d);
+        // D -> A is the only back-edge.
+        let cyclic_count = d.edges.iter().filter(|e| e.is_cyclic).count();
+        assert_eq!(cyclic_count, 1);
+        // A < B,C < D in x order.
+        let xa = d.node("A").unwrap().position.unwrap().x;
+        let xd = d.node("D").unwrap().position.unwrap().x;
+        assert!(xa < xd);
     }
 }

@@ -25,7 +25,8 @@ mod geom;
 mod theme;
 
 pub use geom::{
-    AnchorSlot, NodeSize, Point, PortDirection, TextExtents, Viewport, MIN_NODE_SIDE, NODE_PADDING,
+    AnchorSlot, EdgeLabelAnchor, NodeSize, Point, PortDirection, TextExtents, Viewport,
+    MIN_NODE_SIDE, NODE_PADDING,
 };
 pub use theme::{
     default_theme, list_themes, load_builtin_themes, resolve_theme, Background, ThemeColors,
@@ -52,6 +53,8 @@ pub struct Edge {
     pub is_cyclic: bool,
     /// Resolved route through the grid (filled in Phase 3).
     pub route: Vec<Point>,
+    /// Resolved label anchor (filled in Phase 3 alongside the route).
+    pub label_anchor: Option<EdgeLabelAnchor>,
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +147,7 @@ mod tests {
                     label_extents: Some(TextExtents { width: 30.0, height: 12.0 }),
                     is_cyclic: false,
                     route: vec![Point::new(100, 100), Point::new(200, 100)],
+                    label_anchor: None,
                 },
             ],
             title: None,

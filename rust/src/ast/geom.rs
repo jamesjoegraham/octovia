@@ -84,6 +84,17 @@ pub enum AnchorSlot {
     BottomRight,
 }
 
+/// Resolved anchor for an edge label: the SVG `<text>` position and
+/// `text-anchor` value. Filled by the routing phase so the same pass can
+/// reserve the label's bounding box on the occupancy grid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EdgeLabelAnchor {
+    pub x: i32,
+    pub y: i32,
+    /// SVG `text-anchor` value: `"start"`, `"middle"`, or `"end"`.
+    pub anchor: &'static str,
+}
+
 // ---------------------------------------------------------------------------
 // Text measurement results
 // ---------------------------------------------------------------------------

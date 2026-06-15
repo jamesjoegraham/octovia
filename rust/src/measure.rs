@@ -83,32 +83,28 @@ pub fn measure_text(text: &str) -> TextExtents {
 
 use crate::ast::{Diagram, NodeSize, NODE_PADDING};
 
+/// Sub-grid resolution used by the routing/occupancy layer (px per cell).
+pub const GRID: i32 = 10;
+
+/// Round `n` up to the nearest multiple of `GRID`.
+fn ceil_to_grid(n: i32) -> i32 {
+    ((n + GRID - 1) / GRID) * GRID
+}
+
 /// Run measurement on every label in the diagram, mutating the AST in place.
 ///
-/// All nodes are normalized to share a single uniform width (the maximum
-/// measured width across the diagram), which produces a cleaner, better-
-/// proportioned layout. Heights remain text-driven so wrapped multi-line
-/// labels still fit.
+/// Node dimensions are quantized to the routing sub-grid (10 px) so that
+/// every node block fits cleanly into the occupancy grid. Widths and
+/// heights are text-driven — verbose labels span more grid cells while
+/// short labels remain compact.
 pub fn measure_diagram(diagram: &mut Diagram) {
     for node in &mut diagram.nodes {
         let extents = measure_text(&node.label);
         node.label_extents = Some(extents);
-        node.node_size = Some(NodeSize::from_extents(&extents, NODE_PADDING));
-    }
-
-    // Unify node widths: every node uses the maximum measured width.
-    let uniform_width = diagram
-        .nodes
-        .iter()
-        .filter_map(|n| n.node_size.map(|s| s.width))
-        .max()
-        .unwrap_or(0);
-    if uniform_width > 0 {
-        for node in &mut diagram.nodes {
-            if let Some(ref mut size) = node.node_size {
-                size.width = uniform_width;
-            }
-        }
+        let mut size = NodeSize::from_extents(&extents, NODE_PADDING);
+        size.width = ceil_to_grid(size.width);
+        size.height = ceil_to_grid(size.height);
+        node.node_size = Some(size);
     }
 
     for edge in &mut diagram.edges {

@@ -88,7 +88,7 @@ pub fn render_svg(diagram: &Diagram) -> String {
     // Edge labels (between edges and nodes)
     for (i, edge) in diagram.edges.iter().enumerate() {
         if let Some(ref label) = edge.label {
-            svg.push_str(&edge_label(i, label, &edge.route, colors));
+            svg.push_str(&edge_label(i, label, edge, colors));
             svg.push('\n');
         }
     }
@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn test_render_xml_escaping() {
-        let mut d = Diagram {
+        let d = Diagram {
             nodes: vec![
                 Node {
                     id: "X".into(),

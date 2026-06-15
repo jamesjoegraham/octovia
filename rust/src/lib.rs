@@ -5,11 +5,21 @@
 //!
 //! The engine processes diagram descriptions through a 5-phase pipeline:
 //!
-//!   1. **Parse**: Text DSL or JSON → AST
-//!   2. **Measure**: cosmic-text pre-flight layout for all labels
-//!   3. **Backbone Layout**: Spanning tree + boustrophedon grid placement
-//!   4. **Cyclic Routing**: A* pathfinding with transit-map cost function
-//!   5. **SVG Output**: Clean SVG string with transit-map aesthetic
+//!   1. **Parse**: Text DSL or JSON → AST.
+//!   2. **Measure**: cosmic-text pre-flight layout snaps each node's box
+//!      to the 10 px sub-grid (no global width unification).
+//!   3. **Layered Layout**: classify back-edges (iterative DFS), assign
+//!      every forward node a depth via a longest-path topological sort
+//!      (Kahn / Sugiyama L1), then place layers as columns and stack
+//!      same-layer nodes vertically.
+//!   4. **Unified Routing + Labelling**: a single sequential loop drives
+//!      every edge through one A* pass over a [`routing::GridOccupancy`]
+//!      grid. After each route is committed, a label anchor is searched
+//!      in the local neighbourhood and the label's bounding box is also
+//!      reserved, so subsequent edges and labels treat both routes and
+//!      labels as impassable terrain.
+//!   5. **SVG Output**: deterministic SVG string with the transit-map
+//!      aesthetic (octilinear strokes, end-cap arrows, halo'd labels).
 //!
 //! Compiles to WebAssembly (no DOM, no OS fonts, no headless browser).
 

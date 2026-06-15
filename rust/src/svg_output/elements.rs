@@ -115,18 +115,22 @@ pub(super) fn node_label_inside(
 
 /// Build a `<text>` element for an edge label.
 ///
-/// Placement is delegated to [`crate::label_placement::place_edge_label`];
-/// this function only formats the SVG (including the background-coloured
-/// halo stroke via `paint-order`, which masks any line passing behind the
-/// label).
+/// The anchor is decided during routing (see
+/// [`crate::label_placement::seek_label_anchor`]) so this function only
+/// formats the SVG (including the background-coloured halo stroke via
+/// `paint-order`, which masks any line passing behind the label).
 pub(super) fn edge_label(
     edge_id: usize,
     text: &str,
-    route: &[Point],
+    edge: &crate::ast::Edge,
     colors: &ThemeColors,
 ) -> String {
-    let Some(anchor) = crate::label_placement::place_edge_label(route) else {
-        return String::new();
+    let anchor = match edge.label_anchor {
+        Some(a) => a,
+        None => match crate::label_placement::place_edge_label(&edge.route) {
+            Some(a) => a,
+            None => return String::new(),
+        },
     };
 
     format!(

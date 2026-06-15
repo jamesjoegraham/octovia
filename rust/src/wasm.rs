@@ -8,7 +8,7 @@
 
 use wasm_bindgen::prelude::*;
 
-use crate::ast::{resolve_theme, Background, ThemeColors, Viewport};
+use crate::ast::{resolve_theme, Background};
 use crate::layout::layout_backbone;
 use crate::measure::measure_diagram;
 use crate::parser::{parse_dsl, parse_json};
