@@ -107,7 +107,7 @@ jobs:
 
       - name: Build WASM
         working-directory: rust
-        run: wasm-pack build --target bundler --release --out-dir pkg --scope jamesjoegraham
+        run: wasm-pack build --target bundler --release --out-dir pkg --scope octovia
 
       - uses: actions/setup-node@v4
         with:
