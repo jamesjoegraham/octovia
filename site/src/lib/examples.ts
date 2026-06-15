@@ -1,7 +1,5 @@
 export const EXAMPLES = {
-  'Simple Chain': `title: Simple State Machine
-
-Idle -> Active : recheck
+  'Simple Chain': `Idle -> Active : recheck
 Active -> Processing : submit
 Processing -> Done : complete`,
   'Loop Back': `title: Loop Back
@@ -10,9 +8,7 @@ Idle -> Active : start
 Active -> Idle : cancel
 Active -> Done : finish
 Done -> Idle : reset`,
-  'Branching': `title: Document Workflow
-
-Draft -> Review : submit
+  'Branching': `Draft -> Review : submit
 Review -> Approved : approve
 Review -> Revisions : revise
 Revisions -> Draft : redraft
