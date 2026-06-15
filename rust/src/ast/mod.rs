@@ -72,8 +72,9 @@ pub struct Node {
     pub node_size: Option<NodeSize>,
     /// Position on the grid (Phase 2).
     pub position: Option<Point>,
-    /// Which index in the spanning tree ordering (None if not on spanning tree).
-    pub spanning_index: Option<usize>,
+    /// Depth layer assigned by the longest-path topological sort
+    /// (`None` until the layout phase has run).
+    pub layer: Option<usize>,
 }
 
 // ---------------------------------------------------------------------------
@@ -128,7 +129,7 @@ mod tests {
                     label_extents: Some(TextExtents { width: 40.0, height: 16.0 }),
                     position: Some(Point::new(100, 100)),
                     node_size: Some(NodeSize { width: 64, height: 40 }),
-                    spanning_index: Some(0),
+                    layer: Some(0),
                 },
                 Node {
                     id: "B".into(),
@@ -136,7 +137,7 @@ mod tests {
                     label_extents: None,
                     node_size: None,
                     position: None,
-                    spanning_index: None,
+                    layer: None,
                 },
             ],
             edges: vec![

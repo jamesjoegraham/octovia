@@ -236,7 +236,7 @@ pub fn layout_backbone(diagram: &mut Diagram) {
         for (row, &i) in indices.iter().enumerate() {
             let pos = Point::new(*x_centre.get(&l).unwrap_or(&MARGIN), y_centre[row]);
             diagram.nodes[i].position = Some(pos);
-            diagram.nodes[i].spanning_index = Some(l as usize);
+            diagram.nodes[i].layer = Some(l as usize);
         }
     }
 

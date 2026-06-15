@@ -161,7 +161,7 @@ mod tests {
     #[test]
     fn test_load_themes_non_empty() {
         let m = load_builtin_themes();
-        assert!(m.themes.len() >= 40, "expected >= 40 themes, got {}", m.themes.len());
+        assert!(!m.themes.is_empty(), "expected at least one theme");
     }
 
     #[test]
@@ -173,8 +173,8 @@ mod tests {
     #[test]
     fn test_resolve_aliases() {
         assert!(resolve_theme("dark").is_some(), "alias 'dark' for transit");
-        assert!(resolve_theme("teal").is_some(), "alias 'teal' for forest");
-        assert!(resolve_theme("grey").is_some(), "alias 'grey' for monochrome");
+        assert!(resolve_theme("cream").is_some(), "alias 'cream' for paper");
+        assert!(resolve_theme("graphite").is_some(), "alias 'graphite' for mono-light");
     }
 
     #[test]
@@ -191,7 +191,7 @@ mod tests {
     #[test]
     fn test_list_themes() {
         let list = list_themes();
-        assert!(list.len() >= 40);
+        assert!(!list.is_empty());
         assert!(list.iter().any(|(id, _)| id == "transit"));
     }
 

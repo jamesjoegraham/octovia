@@ -109,7 +109,7 @@ pub fn parse_dsl(input: &str) -> Result<Diagram, String> {
             label_extents: None,
             node_size: None,
             position: None,
-            spanning_index: None,
+            layer: None,
         })
         .collect();
 
@@ -254,17 +254,17 @@ mod tests {
 
     #[test]
     fn test_parse_theme_case_insensitive() {
-        let input = "theme:  Forest  \nA -> B\n";
+        let input = "theme:  Sage  \nA -> B\n";
         let diagram = parse_dsl(input).unwrap();
-        assert_eq!(diagram.theme.node_fill, "#16251D");
-        assert_eq!(diagram.theme.node_stroke, "#3D9B6B");
+        assert_eq!(diagram.theme.node_fill, "#181E18");
+        assert_eq!(diagram.theme.node_stroke, "#789070");
     }
 
     #[test]
     fn test_parse_theme_with_title() {
-        let input = "theme: light\ntitle: My Diagram\nA -> B\n";
+        let input = "theme: paper\ntitle: My Diagram\nA -> B\n";
         let diagram = parse_dsl(input).unwrap();
-        assert_eq!(diagram.theme.bg, "#F5F5F0");
+        assert_eq!(diagram.theme.bg, "#F5F0E8");
         assert_eq!(diagram.title.as_deref(), Some("My Diagram"));
     }
 

@@ -111,11 +111,11 @@ fn test_octo_render_with_theme() {
     assert!(svg_ember.contains("#1C1410"));
     assert!(svg_ember.contains("#D4803A"));
 
-    // Forest theme
-    let forest = ThemeColors::from_str("forest").unwrap();
-    let svg_forest = octo_render_with_theme(dsl, None, Some(forest)).unwrap();
-    assert!(svg_forest.contains("#0F1A14"));
-    assert!(svg_forest.contains("#3D9B6B"));
+    // Sage theme
+    let sage = ThemeColors::from_str("sage").unwrap();
+    let svg_sage = octo_render_with_theme(dsl, None, Some(sage)).unwrap();
+    assert!(svg_sage.contains("#121412"));
+    assert!(svg_sage.contains("#789070"));
 }
 
 #[test]

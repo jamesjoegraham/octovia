@@ -228,7 +228,7 @@ mod tests {
                     label_extents: Some(TextExtents { width: 80.0, height: 16.0 }),
                     node_size: Some(NodeSize { width: 104, height: 40 }),
                     position: Some(Point::new(100, 100)),
-                    spanning_index: Some(0),
+                    layer: Some(0),
                 },
             ],
             edges: vec![],
@@ -289,14 +289,14 @@ mod tests {
     #[test]
     fn test_render_light_theme() {
         let mut d = parse_dsl("A -> B : go\n").unwrap();
-        let light = ThemeColors::from_str("light").unwrap();
-        d.theme = light;
+        let paper = ThemeColors::from_str("paper").unwrap();
+        d.theme = paper;
         measure_diagram(&mut d);
         layout_backbone(&mut d);
         route_all_edges(&mut d);
         let svg = render_svg(&d);
-        assert!(svg.contains("#F5F5F0"), "light bg (label halo)");
-        assert!(svg.contains("#2C2C2E"), "light label color");
+        assert!(svg.contains("#F5F0E8"), "paper bg (label halo)");
+        assert!(svg.contains("#1F2937"), "paper label color");
     }
 
     #[test]

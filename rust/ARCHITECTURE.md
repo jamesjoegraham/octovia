@@ -1,68 +1,69 @@
-# Octovia Render Pipeline — Architecture Document
+# Octovia Render Pipeline — Architecture
 
-> **Principle:** Easy to read, easy to write. Every graph is beautiful because every node connects through exactly 8 ports.
+> **Principle:** Easy to read, easy to write. Every diagram is laid out as a *layered topological grid* and every edge is routed through a single, occupancy-aware A* pass — including its label.
 
 ---
 
 ## Pipeline Overview
 
-The engine processes a DSL description through **6 phases**, each one transforming the AST toward the final SVG:
+The engine processes a DSL or JSON description through **5 phases**. Every phase transforms the AST in place and feeds the next.
 
 ```
-  DSL/JSON
-     │
-     ▼
-┌─────────────────┐
-│  1. Parse       │  nom-based line parser → AST (Node, Edge, Point)
-│                 │  Accepts text DSL or JSON
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│  2. Measure     │  cosmic-text pre-flight layout for all labels
-│                 │  Embedded JetBrains Mono, text-wrapping at MAX_NODE_WIDTH
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│  3. Backbone    │  BFS spanning tree + boustrophedon grid
-│     Layout      │  placement → node.position, is_cyclic tagging
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│  4. Edge        │  Forward: East→West straight lines
-│     Routing     │  Cyclic:  A* with octilinear transit-map cost
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│  5. Label       │  8-slot anchor collision-free placement
-│     Placement   │  Edge labels at route midpoint, node labels centred
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│  6. SVG Output  │  Auto-bounding-box viewBox, themed colours
-└─────────────────┘
+  DSL / JSON
+       │
+       ▼
+┌────────────────────────────┐
+│ 1. Parse                   │  text DSL or JSON  → AST (Node, Edge)
+└──────────────┬─────────────┘
+               ▼
+┌────────────────────────────┐
+│ 2. Measure                 │  cosmic-text → label_extents
+│                            │  → grid-quantised node_size
+└──────────────┬─────────────┘
+               ▼
+┌────────────────────────────┐
+│ 3. Layered Layout          │  classify back-edges (iterative DFS)
+│   (Sugiyama L1)            │  longest-path topological sort  (Kahn)
+│                            │  → node.position, node.layer,
+│                            │    edge.is_cyclic
+└──────────────┬─────────────┘
+               ▼
+┌────────────────────────────┐
+│ 4. Unified Routing +       │  one A* pass per edge over a shared
+│    Labelling               │  GridOccupancy.  After every route is
+│                            │  committed, search the local
+│                            │  neighbourhood for a free label
+│                            │  anchor and reserve its bbox too.
+└──────────────┬─────────────┘
+               ▼
+┌────────────────────────────┐
+│ 5. SVG Output              │  trim polylines to node rectangles,
+│                            │  emit themed SVG with auto viewBox
+└────────────────────────────┘
 ```
 
-## Octavia Diagrams of the Pipeline Itself
-
-The following Octovia DSL renders the pipeline architecture diagram above. Write it in the playground:
+The same pipeline can be expressed *as* an Octovia diagram:
 
 ```
 title: Octovia Render Pipeline
 theme: transit
 
-Parse -> Measure : text_extents
-Measure -> Backbone_Layout : node_size
-Backbone_Layout -> Edge_Routing : positions + is_cyclic
-Edge_Routing -> Label_Placement : routes
-Label_Placement -> SVG_Output : anchors
+Parse -> Measure : text
+Measure -> Layout : node_size
+Layout -> Routing : positions + layers
+Routing -> SVG_Output : routes + label_anchors
 ```
 
-## Phase 1 — Parse (`src/parser.rs`)
+---
 
-### DSL Grammar (text format)
+## Phase 1 — Parse (`src/parser/`)
+
+Two surface formats produce the same `Diagram`:
+
+* **DSL** (`src/parser/dsl.rs`) — line-oriented, narrative.
+* **JSON** (`src/parser/json.rs`) — structured input for adapters and tool calls.
 
 ```
-# Comment
 title: My Machine
 theme: ember
 
@@ -72,379 +73,354 @@ Processing -> Done : complete
 Done -> Idle : reset
 ```
 
-**Parsing rules:**
-- Lines starting with `#` are comments (skipped)
-- `title: <string>` sets the diagram title
-- `theme: <name>` sets the colour theme
-- `Source -> Target : label` adds a directed edge
-- Nodes are created implicitly the first time their ID is seen
-- Also accepts **JSON input** via `parse_json()` for structured data inputs
+Rules:
+* Lines beginning with `#` are comments.
+* `title: <string>`, `theme: <name>`, `background: <colour|theme|transparent>` are directives.
+* `Source -> Target : label` adds a directed edge (label optional).
+* Nodes are created implicitly the first time they appear.
+* Insertion order is preserved — it is load-bearing for deterministic layout.
 
-### AST Types (`src/ast.rs`)
+### AST Types (`src/ast/`)
 
 ```rust
 struct Diagram {
-    nodes: Vec<Node>,       // ordered by insertion
-    edges: Vec<Edge>,       // ordered by declaration
+    nodes: Vec<Node>,        // insertion-ordered
+    edges: Vec<Edge>,        // declaration-ordered
     title: Option<String>,
-    viewport: Viewport,     // { width: u32, height: u32 }
-    theme: Theme,           // Transit | Ember | Forest | Light | Monochrome
+    viewport: Viewport,
+    theme: ThemeColors,
+    background: Background,
 }
 
 struct Node {
     id: String,
     label: String,
     label_extents: Option<TextExtents>,   // ← Phase 2
-    node_size: Option<NodeSize>,           // ← Phase 2
-    position: Option<Point>,               // ← Phase 3
-    spanning_index: Option<usize>,         // ← Phase 3
+    node_size:     Option<NodeSize>,       // ← Phase 2 (grid-quantised)
+    position:      Option<Point>,          // ← Phase 3
+    layer:         Option<usize>,          // ← Phase 3 (depth in topo order)
 }
 
 struct Edge {
     from: String,
-    to: String,
-    label: Option<String>,
+    to:   String,
+    label:         Option<String>,
     label_extents: Option<TextExtents>,   // ← Phase 2
-    is_cyclic: bool,                       // ← Phase 3
-    route: Vec<Point>,                     // ← Phase 4
+    is_cyclic:     bool,                   // ← Phase 3 (back-edge)
+    route:         Vec<Point>,             // ← Phase 4
+    label_anchor:  Option<EdgeLabelAnchor>,// ← Phase 4
 }
+
+struct EdgeLabelAnchor { x: i32, y: i32, anchor: &'static str /* start | middle | end */ }
 ```
 
-**Geometry primitives:**
+Geometry primitives (`src/ast/geom.rs`):
+
 ```rust
-struct Point { x: i32, y: i32 }
-struct NodeSize { width: i32, height: i32 }
+struct Point     { x: i32, y: i32 }
+struct NodeSize  { width: i32, height: i32 }
+struct Viewport  { width: u32, height: u32 }
 
 const MIN_NODE_SIDE: i32 = 60;
-const NODE_PADDING: i32 = 24;
+const NODE_PADDING:  i32 = 24;
 ```
+
+---
 
 ## Phase 2 — Measure (`src/measure.rs`)
 
-Uses **cosmic-text** to measure every label. A global `FontSystem` is initialised once via `OnceLock<Mutex<FontSystem>>` with JetBrains Mono embedded via `include_bytes!`.
+Uses **cosmic-text** with embedded JetBrains Mono to size every label without any DOM or OS font lookup.
 
-```
-                 ┌─────────────────┐
-                 │  FontSystem      │  OnceLock<Mutex<FontSystem>>
-                 │  (global, lazy)  │  JetBrains Mono @ 14px
-                 └────────┬────────┘
-                          │
-                    ┌─────┴──────────┬──────────────┐
-                    ▼                ▼              ▼
-                 ┌────────┐      ┌────────┐     ┌─────────┐
-                 │ Node 1 │      │ Node 2 │ ... │ Edge N  │
-                 │ text   │      │ text   │     │ label   │
-                 │ → exts │      │ → exts │     │ → exts  │
-                 └────────┘      └────────┘     └─────────┘
-```
-
-**Key constants:**
+A single global `FontSystem` is built lazily via `OnceLock<Mutex<FontSystem>>`.
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
-| `MAX_NODE_WIDTH` | `180.0` | Text wraps at this width |
-| `FONT_SIZE` | `14.0` px | Body text size |
-| `LINE_HEIGHT` | `1.35` | Line spacing ratio |
-| `NODE_PADDING` | `24` | Padding inside node rect |
-| `MIN_NODE_SIDE` | `60` | Smallest node dimension |
+| `MAX_NODE_WIDTH` | `180.0` px | Soft wrap target for long labels |
+| `FONT_SIZE`      | `14.0` px | Body text |
+| `LINE_HEIGHT`    | `1.35`    | Line spacing ratio |
+| `NODE_PADDING`   | `24` px   | Padding inside node rect |
+| `MIN_NODE_SIDE`  | `60` px   | Smallest node dimension |
+| `GRID`           | `10` px   | Sub-grid all dimensions snap to |
 
-**Node size formula:**
+**Per-node sizing (no global unification):**
+
 ```
-width  = max(extents.width + NODE_PADDING, MIN_NODE_SIDE)
-height = max(extents.height + NODE_PADDING, MIN_NODE_SIDE)
-width  = max(width, height)  // Ensure proportional, minimum width
+ext         = measure(label, MAX_NODE_WIDTH)
+raw_w       = max(ext.width  + NODE_PADDING, MIN_NODE_SIDE)
+raw_h       = max(ext.height + NODE_PADDING, MIN_NODE_SIDE)
+node_size.w = ceil_to_grid(raw_w)        // multiple of GRID
+node_size.h = ceil_to_grid(raw_h)        // multiple of GRID
 ```
 
-**Output:** each node gets `label_extents` + `node_size`; each edge gets `label_extents`.
+Every node is sized for *its own* label. Earlier versions unified all widths to the single largest node; that has been removed. Quantising to the 10 px sub-grid lets the routing phase reason about node footprints exactly in cell coordinates.
 
 ---
 
-## Phase 3 — Backbone Layout (`src/layout.rs`)
+## Phase 3 — Layered Layout (`src/layout.rs`)
 
-This is where the **spanning tree** (happy path) is extracted and nodes are placed on the grid using the boustrophedon (ox-ploughing) serpentine pattern.
+A lightweight **Sugiyama L1**: classify back-edges, then assign every forward node a depth via a *longest-path* topological sort.
 
-### 3a: Spanning Tree Extraction
+### 3a — Back-edge classification
 
-Octovia diagram of a spanning tree with a cyclic back-edge:
-
-```
-theme: transit
-title: Spanning Tree + Back-Edge
-
-Spanning_Root -> A : bfs
-A -> B : bfs
-B -> C : bfs
-C -> D : bfs_back
-```
-
-**Algorithm:**
-1. Build forward and reverse adjacency maps from all edges
-2. Find the **root** — the first node with zero incoming edges (if none, use first node in list)
-3. BFS from root, visiting forward neighbours → produces the spanning order
-4. Disconnected stragglers (nodes with no edges or isolated subgraphs) are appended to the end
-
-**Cyclic edge detection** (tagged in `is_cyclic`):
-- `spanning_index(to) >= spanning_index(from)` → back-edge
-- Target not in spanning order → cyclic
-
-### 3b: Boustrophedon Grid Placement
-
-The spanning tree is laid out in a serpentine row-filling pattern:
+`classify_back_edges(diagram) -> HashSet<usize>` runs an iterative DFS with three-colour bookkeeping:
 
 ```
-Row 0 (L→R):  A───B───C───D───E
-                            │
-Row 1 (R→L):  J───I───H───G───F
-              │
-Row 2 (L→R):  K───L───M
+WHITE  — unvisited
+GRAY   — currently on the DFS stack
+BLACK  — fully processed
 ```
 
-**Key constants:**
-| Constant | Value | Purpose |
-|----------|-------|---------|
-| `GRID_SPACING_X` | `200` | Horizontal centre-to-centre |
-| `GRID_SPACING_Y` | `150` | Vertical row-to-row |
-| `NODE_RADIUS` | `30` | Fallback half-size |
-| `MIN_VIEWPORT` | `400` | Minimum viewport edge |
+An edge `u → v` is a back-edge iff:
+* `v` is currently `GRAY` (closes a cycle), **or**
+* `v == u` (self-loop).
 
-**Per-row capacity:**
+DFS roots are taken in node insertion order, so the result is deterministic.
+
+### 3b — Longest-path topology
+
+`compute_layers(diagram, back_set)` runs Kahn's algorithm using only forward edges (back-edges and self-edges are skipped). For every node `v`:
+
+$$
+L(v) \;=\; \max_{u \to v \in E_{\text{fwd}}} \bigl(L(u) + 1\bigr), \qquad L(\text{source}) = 0
+$$
+
+Equivalently: `L(v)` is the length of the longest forward path from any source to `v`. This guarantees layered acyclicity — every forward edge points strictly *right* (`L(to) > L(from)`), every back-edge points *left or flat*.
+
+The seeding queue is initialised with sources in input order, so two diagrams with the same logical structure produce identical layer assignments.
+
+### 3c — Grid placement
+
+Layers become **columns**, layers' nodes stack into **rows**:
+
 ```
-usable_width = viewport_width - 4 × node_half_w
-per_row = max(1, usable_width / GRID_SPACING_X)
+layer:        0          1          2          3
+            ┌────┐                ┌────┐    ┌────┐
+            │ A  │ ───────────▶  │ C  │ ──▶│ E  │
+            └────┘                └────┘    └────┘
+                                  ┌────┐
+                                  │ D  │
+            ┌────┐                └────┘
+            │ B  │
+            └────┘
 ```
 
-Where `node_half_w = (MAX_NODE_WIDTH + 24) / 2 ≈ 102`.
+Constants:
 
-**Boustrophedon rule:**
-- Even rows: increasing X (left→right)
-- Odd rows: decreasing X (right→left)
-- Y increases by `GRID_SPACING_Y` per row
+| Constant       | Value | Purpose |
+|----------------|-------|---------|
+| `LAYER_GUTTER` | `90`  | Pixels between layer columns |
+| `ROW_GUTTER`   | `70`  | Pixels between rows |
+| `MARGIN`       | `50`  | Outer margin |
+
+For each layer `l` we compute the layer's column width = `max(node.width)` over its members; for each row `r` we compute the row height = `max(node.height)` over all layers at that row. A cumulative cursor places columns and rows with the gutters above. Each node's `position` is its centre; `layer` records its column.
+
+`is_cyclic` is finally written into every edge from the back-edge set.
 
 ---
 
-## Phase 4 — Edge Routing (`src/routing.rs`)
+## Phase 4 — Unified Routing + Labelling (`src/routing/`)
 
-This is where the **8-port-per-node constraint** creates beautiful graphs.
+This is the heart of the new pipeline. **Every** edge — forward or back — flows through one A* router operating over a shared **GridOccupancy** that is mutated as routes and labels are committed.
 
-### The 8-Port System
+### 4a — Sub-grid model
 
-Every node has exactly **8 connection points**:
+Pixel coordinates `(x, y)` map to grid cells `(x / 10, y / 10)`. Three disjoint cell sets live inside `GridOccupancy`:
 
-```
-              TopLeft    Top    TopRight
-                   ●──────●──────●
-                   │              │
-           Left ●──┼── [ NODE ] ──┼──● Right
-                   │              │
-                   ●──────●──────●
-             BottomLeft  Bottom  BottomRight
-```
+* `node_cells`  — the rectangular block of every placed node, padded by `NODE_BLOCK_MARGIN = 1` cell.
+* `edge_cells`  — every cell along an already-committed polyline.
+* `label_cells` — the bounding box of every already-placed edge label.
 
-> The `AnchorSlot` enum and `direction()`/`is_turn()` helpers already support all 8 octilinear directions. The current port-to-edge assignment uses only 4 cardinal ports (see below), but diagonals are wired in and ready for the router to use when cardinal ports are blocked.
+`is_free(cell)` is the conjunction over all three; the search treats labels as impassable terrain just like nodes and prior edges.
 
-### Current Port Assignment
+A **world bounding box** is also derived from the union of node blocks plus a fixed `WORLD_PAD_CELLS = 12` margin. A* neighbour expansion is bounded by this rectangle so the search is always finite.
 
-| Edge type | Source port | Target port | Path type |
-|-----------|-------------|-------------|-----------|
-| **Forward** | **East** (→) | **West** (←) | **Straight horizontal line** |
-| **Cyclic** | **North** (↑) | **South** (↓) | **A*-routed octilinear path** |
-
-### Two-Pass Routing Algorithm
-
-**Pass 1 — Forward edges** (East→West straight lines):
-
-Every forward edge exits the source node's **East port** and enters the target node's **West port** via a single straight horizontal line. The Y-coordinate is fixed at the source node's row Y. This is the core beauty of the boustrophedon layout: nodes on the same row always connect with perfectly straight, level edges.
-
-Forward edge route example (A→B in row 0):
-```
-  ┌──────┐  ●────────────────────────●  ┌──────┐
-  │  A   │  East────────West─────────→  │  B   │
-  └──────┘                              └──────┘
-```
-
-**Pass 2 — Cyclic edges** (A* octilinear pathfinding):
-
-Cyclic edges use the **North** (source) → **South** (target) port pair. The A* pathfinder navigates the 10px grid, avoiding node blocks and previously-routed edge cells.
-
-Octovia diagram of a cyclic return edge:
+### 4b — Port selection (`src/routing/ports.rs`)
 
 ```
-theme: ember
-title: Cyclic Routing (A*)
-A -> B : forward
-B -> C : forward
-C -> A : cyclic_back
+                  (port = node_centre + (½ size + margin + 1) cells)
+
+forward edge        cyclic / back-edge
+   src → tgt:           src ↺ tgt:
+
+  +───+    +───+         +───+        +───+
+  │ A │ ─▶ │ B │         │ A │ ──┐    │ B │
+  +───+    +───+         +───+   │    +───+
+                                 │      ▲
+                            (S ↓)│      │(N ↑)
+                                 └──────┘
 ```
 
-### A* Cost Function
+* **Forward edges** — `pick_forward_ports(from, to)` picks ports per dominant axis: same column → S/N, same row → E/W, otherwise dominant of |Δx|, |Δy|.
+* **Back-edges** — `pick_back_ports()` is fixed: source **South**, target **North**. A* descends into the bottom routing channel.
 
-```
-f(n) = g(n) + h(n) + T(n) + C(n)
+Ports are placed one cell *outside* the node block so the A* search can move freely around the perimeter.
 
-g(n) = movement cost from start
-h(n) = octile distance to goal
-T(n) = turn_penalty * number_of_direction_changes (≈200 each)
-C(n) = cross_penalty * number_of_occupied_cells_crossed (≈500 each)
-```
+### 4c — A* (`src/routing/astar.rs`)
 
-**Movement costs:**
+Plain A* with the **octile distance** heuristic and 8-direction movement:
+
 | Direction | Cost |
 |-----------|------|
-| Axis-aligned (E, W, N, S) | 10 |
-| Diagonal (NE, NW, SE, SW) | 14 |
+| E, W, N, S      | 10 (orthogonal) |
+| NE, NW, SE, SW  | 14 (diagonal, ≈ √2 × 10) |
 
-**Octile heuristic** (admissible for octilinear movement):
+$$
+h(a, b) \;=\; (|\Delta x| + |\Delta y| - d) \cdot 10 + d \cdot 14, \qquad d = \min(|\Delta x|, |\Delta y|)
+$$
+
+Neighbours are emitted in a fixed order (E, W, S, N, NE, NW, SE, SW) so ties are broken deterministically. The endpoints `start` and `end` always satisfy `is_free`, regardless of node/edge/label state, so a route always exists from a port to its goal.
+
+### 4d — The unified loop (`src/routing/mod.rs`)
+
 ```rust
-fn octile_distance(a, b) {
-    let d = min(|dx|, |dy|);
-    (|dx| + |dy| - d) * 10 + d * 14
+let mut occupancy = GridOccupancy::new(diagram);
+for ei in forward_edges_then_back_edges {
+    let (src_port, tgt_port) = ports_for(edge);
+    let start = port_cell(from_centre, src_size, src_port);
+    let end   = port_cell(to_centre,   tgt_size, tgt_port);
+
+    let cells = astar_cells(start, end, &occupancy)
+        .unwrap_or_else(|| vec![start, end]);
+
+    // Bookend with node centres so the SVG trimmer can cleanly clip
+    // the polyline to each rectangle's edge.
+    let route = [from_centre]
+        ++ cells.iter().map(|(cx,cy)| Point::new(cx*10, cy*10))
+        ++ [to_centre];
+
+    edge.route = route.clone();
+    occupancy.occupy_path(&cells);
+
+    if let Some(extents) = edge.label_extents {
+        if let Some(anchor) = seek_label_anchor(&route, extents, &occupancy) {
+            edge.label_anchor = Some(anchor);
+            occupancy.occupy_label(anchor, extents);
+        }
+    }
 }
+assign_parallel_lanes(diagram);   // post-pass: spread genuinely co-linear edges
 ```
 
-**Why A* only for cyclic edges?** Forward edges are deterministic (always straight East→West), so pathfinding is unnecessary for the happy path. Cyclic edges are the ones that need to navigate around existing content.
+Forward edges are processed before back-edges so back-edges naturally route around already-committed forward routes.
 
-### Grid Occupancy System
+After every route is laid down, `seek_label_anchor` searches the route's local neighbourhood for a non-colliding label position (probing each waypoint, then a fan of perpendicular offsets at multiple magnitudes). The chosen anchor's bounding box is then written into `label_cells`, so subsequent edges and labels treat that label as a wall.
 
-```
-  Cell grid (10px resolution):
-  ┌────┬────┬────┬────┬────┬────┐
-  │    │    │    │    │    │    │
-  ├────┼────┼────┼────┼────┼────┤
-  │    │ ██ │ ██ │ ██ │    │    │  ██ = node occupied
-  ├────┼────┼────┼────┼────┼────┤
-  │    │ ██ │ ██ │ ██ │ ━━ │    │  ━━ = edge occupied
-  ├────┼────┼────┼────┼────┼────┤
-  │    │    │    │ ━━ │    │    │
-  ├────┼────┼────┼────┼────┼────┤
-  │    │    │    │    │    │    │
-  └────┴────┴────┴────┴────┴────┘
-```
+The **lanes** post-pass (`src/routing/lanes.rs`) handles the rare case where two or more forward edges end up perfectly co-linear (same fixed `x` or `y` over an overlapping span); each is shifted one cell perpendicular with 45° connectors at the ends.
 
-- **Node cells:** 3-cell-radius square around each node centre (~60px radius at 10px/cell)
-- **Edge cells:** All cells along a routed path
-- **A* constraint:** Only free cells (neither node nor edge occupied) are traversable
+### 4e — Occupancy invariant
+
+At any point during the loop, the following holds for the partial diagram:
+
+$$
+\texttt{is\_free}(c) \;\Longleftrightarrow\; c \notin (\texttt{nodes} \cup \texttt{committed routes} \cup \texttt{committed labels})
+$$
+
+A* search always respects this set, so by induction no two committed elements share a cell (modulo deliberate path crossings — the router accepts those because forbidding them would make some diagrams unroutable).
 
 ---
 
-## Phase 5 — Label Placement (`src/svg_output.rs`)
+## Phase 5 — SVG Output (`src/svg_output/`)
 
-### Current Implementation
-
-- **Node labels:** Always centred inside the node rectangle
-- **Edge labels:** Placed at the midpoint of the edge route, offset 12px above
-- **Opacity:** Edge labels get `opacity="0.7"` for visual hierarchy
-
-### The 8 Anchor Slots (Future Work)
-
-The `AnchorSlot` enum defines 8 positions around each node:
-
-| Slot | Position | Use case |
-|------|----------|----------|
-| `Right` | 3 o'clock | Forward edge destination |
-| `Left` | 9 o'clock | Forward edge source |
-| `Top` | 12 o'clock | Cyclic edge source |
-| `Bottom` | 6 o'clock | Cyclic edge destination |
-| `TopLeft` | 10:30 | Diagonal cyclic source |
-| `TopRight` | 1:30 | Diagonal cyclic source |
-| `BottomLeft` | 7:30 | Diagonal cyclic destination |
-| `BottomRight` | 4:30 | Diagonal cyclic destination |
-
-An anchor-based label placement system would:
-1. Compute candidate positions for each of the 8 slots around the node
-2. Score each slot by how many edge paths intersect it (fewer = better)
-3. Assign the label to the slot with the fewest overlaps
-
----
-
-## Phase 6 — SVG Output (`src/svg_output.rs`)
-
-### Z-Order (bottom to top)
+### Z-order (bottom to top)
 
 ```
-1. Background fill (viewport rectangle)
+1. Background fill (themed or transparent)
 2. Title text (if any)
-3. Edge paths (stroke-only, no fill)
-4. Edge labels (text with opacity)
+3. Edge paths (themed strokes, dashed for cyclic)
+4. Edge labels (haloed text using the precomputed label_anchor)
 5. Node rectangles (filled + stroked)
 6. Node labels (centred text)
 ```
 
-### Auto-Bounding Box
+### Trimming (`src/svg_output/trim.rs`)
 
-`compute_bounds()` scans every node position and edge route point to create a tight `viewBox`:
+Edge polylines are bookended with the source and target node centres. `trim_route_to_node_boundaries` walks the segments at each end and finds the intersection with the rectangle's edge; the polyline is rewritten to start and end exactly on those rectangle boundaries. The arrowhead marker is then emitted at the (already trimmed) tail.
 
-```rust
-fn compute_bounds(diagram) -> (min_x, min_y, max_x, max_y) {
-    for each node → expand by node half-size + 20px margin
-    for each edge → expand by 10px per route point
-    return bounds + 40px padding in viewBox
-}
-```
+### Auto bounding box (`compute_bounds`)
 
-This means the SVG always fits its content exactly — no wasted space, no clipping.
+Every node rectangle and every route point contributes to `(x_min, y_min, x_max, y_max)`; the result is padded into a tight `viewBox`. The SVG always fits its content with no clipping and no wasted whitespace.
 
-### Theme System
+### Themes
 
-Five colour themes control every visual property:
+Five colour themes drive every visual property:
 
-| Part | Transit 🚇 | Ember 🔥 | Forest 🌲 | Light ☀️ | Mono ⚫ |
-|------|-----------|---------|---------|---------|--------|
-| Background | `#1A1A2E` | `#1C1410` | `#0F1A14` | `#F5F5F0` | `#111112` |
-| Node fill | `#16213E` | `#2A1D16` | `#16251D` | `#FFFFFF` | `#1C1C1E` |
-| Node stroke | `#4A90D9` | `#D4803A` | `#3D9B6B` | `#4A6FA5` | `#888899` |
-| Forward edge | `#4A90D9` | `#D4803A` | `#3D9B6B` | `#4A6FA5` | `#888899` |
-| Cyclic edge | `#E67E22` | `#E8A838` | `#7CC49E` | `#C06030` | `#BBBBC8` |
-| Label | `#E0E0E0` | `#E8D5C0` | `#CDE0D5` | `#2C2C2E` | `#D0D0D6` |
+| Part         | Transit  | Ember    | Forest   | Light    | Mono     |
+|--------------|----------|----------|----------|----------|----------|
+| Background   | `#1A1A2E`| `#1C1410`| `#0F1A14`| `#F5F5F0`| `#111112`|
+| Node fill    | `#16213E`| `#2A1D16`| `#16251D`| `#FFFFFF`| `#1C1C1E`|
+| Node stroke  | `#4A90D9`| `#D4803A`| `#3D9B6B`| `#4A6FA5`| `#888899`|
+| Forward edge | `#4A90D9`| `#D4803A`| `#3D9B6B`| `#4A6FA5`| `#888899`|
+| Cyclic edge  | `#E67E22`| `#E8A838`| `#7CC49E`| `#C06030`| `#BBBBC8`|
+| Label        | `#E0E0E0`| `#E8D5C0`| `#CDE0D5`| `#2C2C2E`| `#D0D0D6`|
 
-Cyclic edges always render with `stroke-dasharray="6,4"` (dashed).
+Cyclic edges always render with `stroke-dasharray="6,4"`.
 
 ---
 
-## The 8-Port Constraint — Why It Makes Beautiful Graphs
+## Mathematical summary
 
-The constraint of **exactly 8 connection points per node** is the secret:
+Let $G = (V, E)$ be a directed multigraph.
 
-```
-       1. Forces planarity     —  8 ports = bounded edge density
-       2. Enforces ordering     —  forward uses E/W, cyclic uses N/S
-       3. Prevents chaos        —  only octilinear angles (0°/45°/90°/135°/etc.)
-       4. Guarantees            —  A* finds clean, separable paths for cycles
-          separability
-```
+1. **Back-edge set** $B \subseteq E$ from iterative DFS:
 
-**Full 8-port routing (current vs future):**
+   $$ B = \{\,(u,v) \in E \mid v \text{ is on the DFS stack when } u\to v \text{ is traversed}\,\} \;\cup\; \{\,(v,v) \in E\,\} $$
 
-The engine currently uses 4 ports for edges but defines 8 in the AST. A natural evolution would be:
+2. **Layer function** $L : V \to \mathbb{Z}_{\geq 0}$ from Kahn's longest-path topo sort over $E \setminus B$:
 
-1. First assign forward edges to East/West
-2. Assign the first few cyclic edges to North/South
-3. When N/S ports are exhausted or blocked, fall through to TopLeft/TopRight/BottomLeft/BottomRight diagonals
-4. The A* pathfinder already supports all 8 octilinear directions — it just needs the port selector to offer diagonal starts
+   $$ L(v) = \max_{u \to v \in E \setminus B}\bigl(L(u) + 1\bigr), \quad L(v) = 0 \text{ if } v \text{ has no forward predecessors} $$
 
----
+3. **Geometric placement** $p : V \to \mathbb{R}^2$ from layered grid: column index = $L(v)$, row index = the node's order within its layer (input order).
 
-## Module Dependency Graph
+4. **Routing**: for every edge $e = (u, v) \in E$ in a fixed schedule (forwards first), find a path
 
-```
-lib.rs (orchestrates the 6-phase pipeline)
-  ├── ast.rs             (types, enums, colour themes — zero dependencies)
-  ├── parser.rs          (depends on ast + nom)
-  ├── measure.rs         (depends on ast + cosmic-text)
-  ├── layout.rs          (depends on ast + measure constants)
-  ├── routing.rs         (depends on ast + layout + pathfinding)
-  ├── svg_output.rs      (depends on ast — pure serialisation)
-  └── wasm.rs            (depends on all modules + wasm-bindgen)
-```
+   $$ \pi_e : \{0, \ldots, n_e\} \to \mathbb{Z}^2, \qquad \pi_e(0) = \text{port}(u, e),\; \pi_e(n_e) = \text{port}(v, e) $$
 
-Each module is independently testable. The crate has **80 total tests** covering every phase.
+   minimising octile cost subject to $\pi_e(k) \in \text{Free}_{<e}$ for $0 < k < n_e$, where $\text{Free}_{<e}$ is the occupancy complement *at the moment $e$ is routed*.
+
+5. **Label placement**: choose anchor $a_e \in \text{Free}_{<e}^{\text{after-route}}$ minimising distance to a midpoint candidate set; reserve $\text{bbox}(a_e, \text{extents}_e)$ into the occupancy for later edges.
+
+6. **SVG**: trim, bookend, emit. End.
 
 ---
 
-## Playground Examples
+## Module dependency graph
 
-Enter these DSL snippets in the Octovia playground to visualise the pipeline:
+```
+lib.rs (orchestrates the 5-phase pipeline)
+  ├── ast/                 (types, themes, geometry — zero deps)
+  ├── parser/              (dsl + json → Diagram)
+  ├── measure.rs           (cosmic-text → label_extents + node_size)
+  ├── layout.rs            (back-edges → layers → positions)
+  ├── label_placement.rs   (free-anchor search around a polyline)
+  ├── routing/             (occupancy + ports + astar + lanes)
+  ├── svg_output/          (defs + elements + trim + render)
+  └── wasm.rs              (wasm-bindgen entry points)
+```
 
-### Simple chain (forward edges only)
+Each module is independently testable. The crate ships **101 unit tests** plus **11 integration tests**, all green and deterministic.
+
+---
+
+## Determinism
+
+Octovia is deterministic by design:
+
+* `BTreeMap` iteration in `compute_layers`.
+* DFS roots seeded from `nodes` in input order.
+* A* neighbour order is a fixed array of 8 directions.
+* `pathfinding::astar` ties broken by insertion order in the open set.
+* Routing schedule is `[forward_edges_in_input_order, back_edges_in_input_order]`.
+* Label anchor search probes waypoints in a fixed mid-out spiral.
+
+The `test_octo_render_is_deterministic` integration test renders the same DSL twice and asserts byte-for-byte equality.
+
+---
+
+## Playground examples
+
+Drop these into the playground to see the pipeline in action.
+
+### Linear chain
 ```
 theme: transit
 title: Forward Edges — Happy Path
@@ -454,17 +430,17 @@ Active -> Processing : submit
 Processing -> Done : complete
 ```
 
-### Triangle cycle (one cyclic back-edge)
+### Triangular cycle
 ```
 theme: ember
-title: Cyclic Edge — Back-Edge
+title: Back-Edge
 
 A -> B : forward_1
 B -> C : forward_2
 C -> A : cycle_back
 ```
 
-### Diamond with feedback (multiple cycle types)
+### Diamond with feedback
 ```
 theme: forest
 title: Diamond + Feedback

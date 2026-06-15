@@ -21,7 +21,7 @@ use crate::svg_output::render_svg;
 /// * `dsl` - The text DSL string (sequence-first syntax).
 /// * `viewport_width` - Optional viewport width in pixels (default: 1200).
 /// * `viewport_height` - Optional viewport height in pixels (default: 800).
-/// * `theme` - Optional theme string. Any theme id from themes.json (e.g. "transit", "ember", "forest", "ocean").
+/// * `theme` - Optional theme string. Any theme id from themes.json (e.g. "transit", "ember", "paper", "nord").
 /// * `background` - Optional SVG canvas background. Accepts `"transparent"`,
 ///   `"theme"` (use the active theme's `bg`), or any CSS colour string.
 ///   Defaults to `"transparent"`.

@@ -43,7 +43,7 @@ pub fn parse_json(json: &str) -> Result<Diagram, String> {
                 label_extents: None,
                 node_size: None,
                 position: None,
-                spanning_index: None,
+                layer: None,
             });
         }
     }
@@ -77,7 +77,7 @@ pub fn parse_json(json: &str) -> Result<Diagram, String> {
                 label_extents: None,
                 node_size: None,
                 position: None,
-                spanning_index: None,
+                layer: None,
             });
         }
         if !nodes.iter().any(|n| n.id == edge.to) {
@@ -87,7 +87,7 @@ pub fn parse_json(json: &str) -> Result<Diagram, String> {
                 label_extents: None,
                 node_size: None,
                 position: None,
-                spanning_index: None,
+                layer: None,
             });
         }
     }
