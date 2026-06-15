@@ -7,9 +7,6 @@ edition = "2024"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Parsing: nom is zero-cost, no-allocation JSON/DSL parsing
-nom = { version = "7", features = ["std"] }
-
 # Text measurement: cosmic-text for pure-Rust font layout + shaping
 cosmic-text = "0.12"
 unicode-linebreak = "0.1"

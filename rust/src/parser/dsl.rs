@@ -1,125 +1,19 @@
-//! DSL parser using nom.
+//! Text-format DSL parser.
 //!
-//! Accepts two formats:
-//!
-//! **Text format** (sequence-first):
+//! Grammar:
 //! ```text
 //! title: My State Machine
+//! theme: ember
+//! background: #112233
 //! Idle -> Active : recheck
 //! Active -> Processing : submit
 //! ```
 //!
 //! Lines beginning with `#` are comments. Empty lines are skipped.
-//! A `title:` directive at the top sets the diagram title.
-//! Each transition line: `Source -> Target : optional_label`
-
-use nom::{
-    branch::alt,
-    bytes::complete::{tag, take_while1},
-    character::complete::{multispace0, not_line_ending},
-    combinator::{map, opt},
-    sequence::{preceded, tuple},
-    IResult,
-};
+//! `title:`, `theme:`, and `background:` are optional directives at the top.
+//! Each transition line: `Source -> Target : optional_label`.
 
 use crate::ast::{resolve_theme, Background, Diagram, Edge, Node, ThemeColors, Viewport};
-
-// ---------------------------------------------------------------------------
-// Helper combinators
-// ---------------------------------------------------------------------------
-
-/// Whitespace (including newlines) — we handle lines ourselves.
-fn ws(input: &str) -> IResult<&str, &str> {
-    multispace0(input)
-}
-
-/// A state identifier: non-empty string, no whitespace, no `->` or `:`
-fn identifier(input: &str) -> IResult<&str, &str> {
-    take_while1(|c: char| c.is_alphanumeric() || c == '_' || c == '-')(input)
-}
-
-/// A label for a transition (rest of the line after `:`)
-fn transition_label(input: &str) -> IResult<&str, &str> {
-    map(
-        preceded(tag(":"), take_while1(|c: char| !c.is_control() && c != '\n' && c != '\r')),
-        |s: &str| s.trim(),
-    )(input)
-}
-
-// ---------------------------------------------------------------------------
-// Transition line parser: `Source -> Target : label`
-// ---------------------------------------------------------------------------
-
-fn transition_line(input: &str) -> IResult<&str, Edge> {
-    let (rest, (from, _, _, _, to, _, label)) = tuple((
-        identifier,
-        ws,
-        tag("->"),
-        ws,
-        identifier,
-        ws,
-        opt(transition_label),
-    ))(input)?;
-    Ok((
-        rest,
-        Edge {
-            from: from.to_string(),
-            to: to.to_string(),
-            label: label.map(|s| s.to_string()),
-            label_extents: None,
-            is_cyclic: false,
-            route: Vec::new(),
-        },
-    ))
-}
-
-// ---------------------------------------------------------------------------
-// Title line parser: `title: My Title`
-// ---------------------------------------------------------------------------
-
-fn title_directive(input: &str) -> IResult<&str, String> {
-    let (rest, (_, t)) = tuple((
-        tag("title:"),
-        alt((
-            // rest of line, trimmed
-            map(not_line_ending, |s: &str| s.trim().to_string()),
-        )),
-    ))(input)?;
-    Ok((rest, t))
-}
-
-// ---------------------------------------------------------------------------
-// A single line (skip comments and blanks; parse title or transition)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug)]
-enum Line {
-    Title(String),
-    Transition(Edge),
-    Skip,
-}
-
-fn line(input: &str) -> IResult<&str, Line> {
-    let (rest, _) = ws(input)?;
-    // At start of line — check for comment, empty, title, or transition
-    let (rest, _) = opt(tag("\n"))(rest)?; // handle leftover newline from previous line
-    // Actually, let's do a per-line approach by splitting on newlines manually.
-    // Better approach: match the whole line as a single chunk.
-    alt((
-        // Comment line
-        map(preceded(tag("#"), not_line_ending), |_| Line::Skip),
-        // Empty line
-        map(tag(""), |_| Line::Skip),
-        // Title directive
-        map(title_directive, Line::Title),
-        // Transition line
-        map(transition_line, Line::Transition),
-    ))(input)
-}
-
-// ---------------------------------------------------------------------------
-// Full document parser
-// ---------------------------------------------------------------------------
 
 /// Parse a text-format DSL string into a Diagram.
 pub fn parse_dsl(input: &str) -> Result<Diagram, String> {
@@ -225,120 +119,6 @@ pub fn parse_dsl(input: &str) -> Result<Diagram, String> {
         theme: theme.unwrap_or_default(),
         viewport: Viewport::default(),
         background,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// JSON format parser — for structured input from LLMs / adapter layers
-// ---------------------------------------------------------------------------
-
-/// A JSON-serializable snapshot for alternate DSL input.
-#[derive(serde::Deserialize)]
-struct JsonDiagram {
-    title: Option<String>,
-    #[serde(default)]
-    theme: Option<String>,
-    #[serde(default)]
-    background: Option<String>,
-    states: Vec<String>,
-    transitions: Vec<JsonTransition>,
-    viewport: Option<JsonViewport>,
-}
-
-#[derive(serde::Deserialize)]
-struct JsonTransition {
-    from: String,
-    to: String,
-    label: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct JsonViewport {
-    width: u32,
-    height: u32,
-}
-
-/// Parse a JSON-format diagram description.
-pub fn parse_json(json: &str) -> Result<Diagram, String> {
-    let jd: JsonDiagram = serde_json::from_str(json).map_err(|e| format!("JSON parse error: {e}"))?;
-
-    let mut nodes = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    for s in &jd.states {
-        if seen.insert(s.clone()) {
-            nodes.push(Node {
-                id: s.clone(),
-                label: s.clone(),
-                label_extents: None,
-                node_size: None,
-                position: None,
-                spanning_index: None,
-            });
-        }
-    }
-
-    let edges: Vec<Edge> = jd
-        .transitions
-        .into_iter()
-        .map(|jt| {
-            // Ensure target state exists
-            if seen.insert(jt.to.clone()) {
-                // Actually we shouldn't add here in a pure pass — the JSON must declare all states
-            }
-            Edge {
-                from: jt.from,
-                to: jt.to,
-                label: jt.label,
-                label_extents: None,
-                is_cyclic: false,
-                route: Vec::new(),
-            }
-        })
-        .collect();
-
-    // Ensure all referenced states exist
-    for edge in &edges {
-        if !nodes.iter().any(|n| n.id == edge.from) {
-            nodes.push(Node {
-                id: edge.from.clone(),
-                label: edge.from.clone(),
-                label_extents: None,
-                node_size: None,
-                position: None,
-                spanning_index: None,
-            });
-        }
-        if !nodes.iter().any(|n| n.id == edge.to) {
-            nodes.push(Node {
-                id: edge.to.clone(),
-                label: edge.to.clone(),
-                label_extents: None,
-                node_size: None,
-                position: None,
-                spanning_index: None,
-            });
-        }
-    }
-
-    let viewport = jd
-        .viewport
-        .map(|v| Viewport {
-            width: v.width,
-            height: v.height,
-        })
-        .unwrap_or_default();
-
-    Ok(Diagram {
-        nodes,
-        edges,
-        title: jd.title,
-        theme: jd.theme.and_then(|t| resolve_theme(&t)).unwrap_or_default(),
-        viewport,
-        background: jd
-            .background
-            .map(|s| Background::parse_value(&s))
-            .unwrap_or_default(),
     })
 }
 
@@ -450,63 +230,6 @@ mod tests {
     }
 
     #[test]
-    fn test_json_parse_basic() {
-        let json = r#"{
-            "title": "JSON Test",
-            "states": ["X", "Y"],
-            "transitions": [
-                {"from": "X", "to": "Y", "label": "go"}
-            ]
-        }"#;
-        let diagram = parse_json(json).unwrap();
-        assert_eq!(diagram.title.as_deref(), Some("JSON Test"));
-        assert_eq!(diagram.nodes.len(), 2);
-        assert_eq!(diagram.edges.len(), 1);
-        assert_eq!(diagram.edges[0].label.as_deref(), Some("go"));
-    }
-
-    #[test]
-    fn test_json_parse_with_viewport() {
-        let json = r#"{
-            "states": ["A"],
-            "transitions": [],
-            "viewport": {"width": 800, "height": 600}
-        }"#;
-        let diagram = parse_json(json).unwrap();
-        assert_eq!(diagram.viewport.width, 800);
-        assert_eq!(diagram.viewport.height, 600);
-    }
-
-    #[test]
-    fn test_json_parse_empty() {
-        let json = r#"{"states": [], "transitions": []}"#;
-        let diagram = parse_json(json).unwrap();
-        assert_eq!(diagram.nodes.len(), 0);
-        assert_eq!(diagram.edges.len(), 0);
-    }
-
-    #[test]
-    fn test_json_parse_invalid() {
-        let json = r#"{"bad": "data"}"#;
-        let result = parse_json(json);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_json_with_implicit_states() {
-        // States referenced in transitions but not declared in "states" array
-        let json = r#"{
-            "states": ["A"],
-            "transitions": [
-                {"from": "A", "to": "B"}
-            ]
-        }"#;
-        let diagram = parse_json(json).unwrap();
-        // B should be added implicitly
-        assert!(diagram.node("B").is_some());
-    }
-
-    #[test]
     fn test_parse_theme_directive() {
         let input = "theme: ember\nA -> B\n";
         let diagram = parse_dsl(input).unwrap();
@@ -585,28 +308,6 @@ mod tests {
     #[test]
     fn test_parse_background_value_theme_keyword() {
         let diagram = parse_dsl("background: theme\nA -> B\n").unwrap();
-        assert_eq!(diagram.background, Background::Theme);
-    }
-
-    #[test]
-    fn test_parse_json_background_field() {
-        let json = r#"{
-            "background": "transparent",
-            "states": ["A", "B"],
-            "transitions": [{"from": "A", "to": "B"}]
-        }"#;
-        let diagram = parse_json(json).unwrap();
-        assert_eq!(diagram.background, Background::Transparent);
-    }
-
-    #[test]
-    fn test_parse_json_background_theme_keyword() {
-        let json = r#"{
-            "background": "theme",
-            "states": ["A", "B"],
-            "transitions": [{"from": "A", "to": "B"}]
-        }"#;
-        let diagram = parse_json(json).unwrap();
         assert_eq!(diagram.background, Background::Theme);
     }
 }
