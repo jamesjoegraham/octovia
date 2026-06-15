@@ -1,38 +1,40 @@
 export const EXAMPLES = {
-  'Simple Chain': `Idle -> Active : recheck
-Active -> Processing : submit
-Processing -> Done : complete`,
-  'Loop Back': `title: Loop Back
+  'Pizza Order': `Ordered -> Preparing : confirm
+Preparing -> OutForDelivery : ready
+OutForDelivery -> Delivered : arrive`,
+  'Music Player': `title: Music Player
 
-Idle -> Active : start
-Active -> Idle : cancel
-Active -> Done : finish
-Done -> Idle : reset`,
-  'Branching': `Draft -> Review : submit
-Review -> Approved : approve
-Review -> Revisions : revise
-Revisions -> Draft : redraft
-Revisions -> Review : resubmit
-Approved -> Published : publish`,
-  'Concurrent': `title: Build Pipeline
+Stopped -> Playing : play
+Playing -> Paused : pause
+Paused -> Playing : resume
+Playing -> Stopped : stop`,
+  'Pull Request': `title: Pull Request
+
+Draft -> Open : ready for review
+Open -> ChangesRequested : request changes
+ChangesRequested -> Open : push update
+Open -> Approved : approve
+Approved -> Merged : merge
+Open -> Closed : close`,
+  'CI/CD Pipeline': `title: CI/CD Pipeline
 
 Queued -> Fetching : start
-Fetching -> Building : ready
+Fetching -> Building : checkout ready
 Building -> Testing : compiled
 Testing -> Packaging : passed
 Testing -> Failed : fail
-Packaging -> Deploying : deploy
-Deploying -> Live : done
+Packaging -> Deploying : artifact ready
+Deploying -> Live : healthy
 Failed -> Queued : retry`,
-  'Protocol Handshake': `title: TCP Style Handshake
+  'OAuth Login': `title: OAuth 2.0 Flow
 
-Closed -> SynSent : open
-SynSent -> SynReceived : syn+ack
-SynReceived -> Established : ack
-Established -> FinWait1 : close
-FinWait1 -> FinWait2 : ack
-FinWait2 -> TimeWait : fin
-TimeWait -> Closed : timeout`,
+LoggedOut -> Authorizing : sign in
+Authorizing -> Consent : redirect
+Consent -> CodeIssued : approve
+Consent -> LoggedOut : deny
+CodeIssued -> ExchangingToken : callback
+ExchangingToken -> LoggedIn : token granted
+LoggedIn -> LoggedOut : sign out`,
   'Traffic Light': `title: Traffic Light
 
 Green -> Yellow : timer

@@ -11,7 +11,7 @@
   type RenderFn = (d: string, w?: number | null, h?: number | null) => string;
   type Page = 'home' | 'playground' | 'about';
 
-  let dsl = $state(EXAMPLES['Simple Chain']);
+  let dsl = $state(EXAMPLES['Pizza Order']);
   let svg = $state('');
   let err = $state('');
   let ready = $state(false);

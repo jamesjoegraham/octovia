@@ -17,13 +17,13 @@
   } = $props();
 
   // Three curated examples for the homepage taster.
-  const HOME_EXAMPLES: ExampleName[] = ['Simple Chain', 'Branching', 'Order Lifecycle'];
+  const HOME_EXAMPLES: ExampleName[] = ['Pizza Order', 'Pull Request', 'Order Lifecycle'];
 
   // Debounce window for textarea edits: render once typing pauses.
   const DEBOUNCE_MS = 2000;
 
-  let selected = $state<ExampleName>('Simple Chain');
-  let dsl = $state<string>(EXAMPLES['Simple Chain']);
+  let selected = $state<ExampleName>('Pizza Order');
+  let dsl = $state<string>(EXAMPLES['Pizza Order']);
   let svg = $state('');
   let err = $state('');
   let lastMs = $state<number | null>(null);
