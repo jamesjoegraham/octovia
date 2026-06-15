@@ -3,6 +3,7 @@
   import { EXAMPLES, type ExampleName } from '../lib/examples';
   import { THEMES, THEME_LABELS } from '../lib/themes';
   import { currentTheme, withTheme } from '../lib/dsl';
+  import HelpIcon from './icons/HelpIcon.svelte';
 
   const BLANK = 'Blank' as const;
   type Selection = typeof BLANK | ExampleName;
@@ -27,6 +28,15 @@
   const exampleNames = Object.keys(EXAMPLES) as ExampleName[];
   const allOptions: Selection[] = [BLANK, ...exampleNames];
 
+  const isMac =
+    typeof navigator !== 'undefined' &&
+    /Mac|iPhone|iPad|iPod/i.test(
+      (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ??
+        navigator.platform ??
+        navigator.userAgent,
+    );
+  const renderShortcut = isMac ? '⌘⏎' : 'Ctrl+⏎';
+
   // Switch between scrollable tab strip and dropdown based on the panel's
   // own width, so this responds to the editor pane (not just the viewport).
   const TABS_BREAKPOINT = 480;
@@ -36,6 +46,8 @@
   let scrollEl = $state<HTMLDivElement | null>(null);
   let canScrollLeft = $state(false);
   let canScrollRight = $state(false);
+  
+  let cheatsheetModal: HTMLDialogElement;
 
   function updateScrollState() {
     const el = scrollEl;
@@ -204,10 +216,21 @@
       </select>
     </div>
 
-    <div class="ml-auto">
+    <!-- Help & Render Buttons -->
+    <div class="ml-auto flex items-center gap-2">
+      <button
+        type="button"
+        class="btn btn-sm btn-ghost btn-square text-base-content/60 hover:text-base-content"
+        onclick={() => cheatsheetModal.showModal()}
+        title="Syntax Cheatsheet"
+        aria-label="Open Syntax Cheatsheet"
+      >
+        <HelpIcon size={18} />
+      </button>
+      
       <button onclick={render} disabled={!ready} class="btn btn-neutral btn-sm">
         {#if ready}
-          Render ⌘⏎
+          Render {renderShortcut}
         {:else}
           Loading…
         {/if}
@@ -215,3 +238,39 @@
     </div>
   </div>
 </section>
+
+<!-- Syntax Cheatsheet Modal -->
+<dialog bind:this={cheatsheetModal} class="modal backdrop-blur-sm">
+  <div class="modal-box bg-base-100 border border-base-300 shadow-xl max-w-2xl p-0 overflow-hidden">
+    <div class="p-4 border-b border-base-300 bg-base-200/50 flex justify-between items-center">
+      <h3 class="font-semibold text-base-content">Syntax Guide</h3>
+      <form method="dialog">
+        <button class="btn btn-sm btn-circle btn-ghost">✕</button>
+      </form>
+    </div>
+
+    <div class="p-6 overflow-y-auto max-h-[60vh]">
+      <div class="space-y-6 text-sm text-base-content/80">
+        <div>
+          <h4 class="font-semibold text-base-content mb-2 border-b border-base-200 pb-1">Nodes & Edges</h4>
+          <p class="mb-2">Define paths using the <code class="font-mono bg-base-200 px-1 rounded text-xs">-></code> operator. Labels go after a colon.</p>
+          <pre class="bg-base-200 p-3 rounded-md font-mono text-xs text-base-content/70"><code>Source -> Target : edge label</code></pre>
+        </div>
+
+        <div>
+          <h4 class="font-semibold text-base-content mb-2 border-b border-base-200 pb-1">Properties</h4>
+          <p class="mb-2">Global properties are set with a colon at the top of the file.</p>
+            <pre class="bg-base-200 p-3 rounded-md font-mono text-xs text-base-content/70 flex flex-col">
+              <code>title: My Diagram</code>
+              <code>theme: transit | ember | monochrome | light | forest</code>
+            </pre>
+        </div>
+
+      </div>
+    </div>
+  </div>
+  
+  <form method="dialog" class="modal-backdrop">
+    <button type="button" onclick={() => cheatsheetModal.close()} class="cursor-default">close</button>
+  </form>
+</dialog>

@@ -110,7 +110,7 @@
             Octovia
           </h1>
           <span class="badge badge-primary badge-outline badge-sm mt-2 hidden sm:inline-flex font-mono">
-            v1.0.0
+            v0.1.0
           </span>
         </div>
         
