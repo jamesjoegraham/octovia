@@ -1,6 +1,9 @@
 # Rust build artifacts
 target/
 
+# wasm-pack output
+pkg/
+
 # Generated example SVGs
 temp/
 !temp/.gitkeep
