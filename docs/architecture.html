@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Octovia — Render Pipeline Architecture</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'JetBrains Mono', monospace;
+    background: #020617;
+    color: #cbd5e1;
+    padding: 40px;
+    line-height: 1.7;
+  }
+
+  .container {
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-size: 28px;
+    font-weight: 700;
+    color: #f1f5f9;
+    margin-bottom: 8px;
+    letter-spacing: -0.02em;
+  }
+
+  .subtitle {
+    color: #64748b;
+    font-size: 13px;
+    margin-bottom: 40px;
+  }
+
+  h2 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #e2e8f0;
+    margin-top: 48px;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #1e293b;
+    letter-spacing: -0.01em;
+  }
+
+  h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #94a3b8;
+    margin-top: 28px;
+    margin-bottom: 10px;
+  }
+
+  p { margin-bottom: 14px; font-size: 13px; color: #94a3b8; line-height: 1.8; }
+  strong { color: #e2e8f0; font-weight: 600; }
+  code { background: #0f172a; padding: 1px 6px; border-radius: 3px; font-size: 12px; color: #7dd3fc; }
+
+  /* Pipeline SVG card */
+  .pipeline-card {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 12px;
+    padding: 24px;
+    margin: 24px 0;
+    text-align: center;
+  }
+
+  .pipeline-card svg {
+    max-width: 100%;
+    border-radius: 6px;
+  }
+
+  .diagram-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 20px 0;
+  }
+
+  .diagram-card {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  .diagram-card h4 {
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 10px;
+  }
+
+  .diagram-card svg {
+    max-width: 100%;
+    border-radius: 4px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    margin: 16px 0;
+  }
+
+  th {
+    background: #0f172a;
+    color: #94a3b8;
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid #1e293b;
+    font-weight: 600;
+  }
+
+  td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #1e293b;
+    color: #cbd5e1;
+  }
+
+  td:first-child { font-weight: 600; color: #e2e8f0; }
+
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .pill-transit { background: rgba(74, 144, 217, 0.15); color: #4A90D9; }
+  .pill-ember { background: rgba(212, 128, 58, 0.15); color: #D4803A; }
+  .pill-forest { background: rgba(61, 155, 107, 0.15); color: #3D9B6B; }
+  .pill-light { background: rgba(245, 245, 240, 0.1); color: #cbd5e1; }
+  .pill-mono { background: rgba(136, 136, 153, 0.15); color: #888899; }
+
+  .badge {
+    display: inline-block;
+    background: #1e293b;
+    color: #94a3b8;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    margin-right: 4px;
+  }
+
+  hr {
+    border: none;
+    border-top: 1px solid #1e293b;
+    margin: 32px 0;
+  }
+
+  .port-diagram {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 10px;
+    padding: 20px;
+    margin: 16px 0;
+    text-align: center;
+    font-family: monospace;
+    white-space: pre;
+    line-height: 1.6;
+    color: #64748b;
+  }
+
+  .port-diagram .highlight {
+    color: #7dd3fc;
+  }
+
+  .port-diagram .edge-fwd { color: #4A90D9; }
+  .port-diagram .edge-cyc { color: #E67E22; font-weight: bold; }
+
+  .code-block {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 8px;
+    padding: 16px;
+    font-size: 12px;
+    line-height: 1.7;
+    overflow-x: auto;
+    margin: 12px 0;
+    color: #94a3b8;
+  }
+
+  .code-block .kw { color: #c084fc; }
+  .code-block .fn { color: #7dd3fc; }
+  .code-block .ty { color: #34d399; }
+  .code-block .cm { color: #64748b; }
+  .code-block .str { color: #fbbf24; }
+  .code-block .num { color: #f472b6; }
+
+  .footer {
+    margin-top: 48px;
+    padding-top: 16px;
+    border-top: 1px solid #1e293b;
+    font-size: 11px;
+    color: #475569;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>🦓 Octovia — Render Pipeline Architecture</h1>
+<p class="subtitle">A bespoke, DOM-free state diagram rendering engine in pure Rust &bull; 6 phases &bull; 8 ports &bull; 80 tests</p>
+
+<h2>Core Principle</h2>
+<p>
+  <strong>Easy to read, easy to write</strong> — every graph is beautiful because every node connects
+  through exactly <strong>8 ports</strong>. No arbitrary angles, no overlapping chaos, no bezier spaghetti.
+  Output is pure SVG in the London Underground transit-map style.
+</p>
+
+<h2>Pipeline Overview</h2>
+
+<div class="pipeline-card">
+  <img src="../rust/assets/diagrams/octovia-pipeline.svg" alt="Octovia Render Pipeline" />
+</div>
+
+<p>
+  The engine processes a DSL description through <strong>6 phases</strong>, each transforming the
+  AST toward the final SVG. The pipeline is linear — each phase depends only on the output of
+  the previous one.
+</p>
+
+<table>
+  <tr>
+    <th>Phase</th><th>Module</th><th>Input</th><th>Output</th><th>Dependency</th>
+  </tr>
+  <tr><td>1</td><td><code>parser</code></td><td>DSL / JSON text</td><td><code>Diagram {nodes, edges}</code></td><td><code>nom</code></td></tr>
+  <tr><td>2</td><td><code>measure</code></td><td>Labels (string)</td><td><code>{text_extents, node_size}</code></td><td><code>cosmic-text</code></td></tr>
+  <tr><td>3</td><td><code>layout</code></td><td>Nodes + edges</td><td><code>{position, is_cyclic}</code></td><td>—</td></tr>
+  <tr><td>4</td><td><code>routing</code></td><td>Positions + topology</td><td><code>edge.route: Vec&lt;Point&gt;</code></td><td><code>pathfinding</code></td></tr>
+  <tr><td>5</td><td><code>svg_output</code></td><td>Full resolved diagram</td><td>SVG string</td><td>—</td></tr>
+</table>
+
+<h2>Phase 1 — Parse</h2>
+<p>
+  Two input formats: a <strong>text DSL</strong> (parsed line-by-line with string splitting, not nom combinators)
+  and <strong>JSON</strong> (deserialised with serde). Both produce the same AST types.
+</p>
+
+<div class="code-block">
+  <span class="cm"># Comment line</span>
+  <span class="kw">title:</span> <span class="str">My State Machine</span>
+  <span class="kw">theme:</span> <span class="str">ember</span>
+
+  Idle -&gt; Active : recheck
+  Active -&gt; Processing : submit
+  Processing -&gt; Done : complete
+  Done -&gt; Idle : reset
+</div>
+
+<h2>Phase 2 — Measure</h2>
+<p>
+  A global <code>FontSystem</code> (initialised once via <code>OnceLock&lt;Mutex&lt;&gt;&gt;</code>)
+  loads JetBrains Mono at 14px. Each label is measured and text wraps at <strong>MAX_NODE_WIDTH = 180px</strong>.
+</p>
+
+<div class="code-block">
+  <span class="cm">// Constants</span>
+  MAX_NODE_WIDTH: <span class="num">180.0</span>   <span class="cm">// wrap limit</span>
+  FONT_SIZE:      <span class="num">14.0</span>     <span class="cm">// px</span>
+  LINE_HEIGHT:    <span class="num">1.35</span>    <span class="cm">// line spacing</span>
+  NODE_PADDING:   <span class="num">24</span>       <span class="cm">// px inside node</span>
+  MIN_NODE_SIDE:  <span class="num">60</span>       <span class="cm">// smallest dimension</span>
+</div>
+
+<h2>Phase 3 — Backbone Layout</h2>
+
+<h3>3a — Spanning Tree Extraction</h3>
+<p>
+  BFS from the root node (preferring one with zero incoming edges). Forward edges form the
+  <strong>happy path</strong>. Edges where <code>spanning_index(to) &le; spanning_index(from)</code>
+  are tagged <code>is_cyclic = true</code>.
+</p>
+
+<div class="diagram-grid">
+  <div class="diagram-card">
+    <h4>Spanning Tree + Back-Edge</h4>
+    <img src="../rust/assets/diagrams/octovia-spanning.svg" alt="Spanning tree diagram" />
+  </div>
+  <div class="diagram-card">
+    <h4>Cyclic A* Routing</h4>
+    <img src="../rust/assets/diagrams/octovia-cyclic.svg" alt="Cyclic routing diagram" />
+  </div>
+</div>
+
+<h3>3b — Boustrophedon Grid</h3>
+<p>
+  The spanning tree is laid out in a <strong>serpentine</strong> (ox-ploughing) pattern. Even rows fill
+  left→right, odd rows right→left, wrapping at a row width computed from the viewport.
+</p>
+
+<div class="code-block">
+  per_row = max(1, (viewport_width - 4 * node_half_w) / GRID_SPACING_X)
+
+  <span class="cm">// Boustrophedon rule:</span>
+  <span class="kw">if</span> row % <span class="num">2</span> == <span class="num">0</span>:
+      x = margin + col * GRID_SPACING_X      <span class="cm">// left→right</span>
+  <span class="kw">else</span>:
+      x = margin + (per_row - 1 - col) * GRID_SPACING_X  <span class="cm">// right→left</span>
+</div>
+
+<table>
+  <tr><th>Constant</th><th>Value</th><th>Purpose</th></tr>
+  <tr><td>GRID_SPACING_X</td><td>200</td><td>Horizontal centre-to-centre</td></tr>
+  <tr><td>GRID_SPACING_Y</td><td>150</td><td>Vertical row-to-row</td></tr>
+  <tr><td>NODE_RADIUS</td><td>30</td><td>Fallback half-size</td></tr>
+  <tr><td>MIN_VIEWPORT</td><td>400</td><td>Minimum viewport edge</td></tr>
+</table>
+
+<h2>Phase 4 — Edge Routing (The 8-Port Constraint)</h2>
+
+<h3>The 8-Port System</h3>
+
+<div class="port-diagram">
+              <span class="highlight">TopLeft</span>    <span class="highlight">Top</span>    <span class="highlight">TopRight</span>
+                   ●──────●──────●
+                   │              │
+          <span class="highlight">Left</span> ●──┼── [ <span class="edge-fwd">NODE</span> ] ──┼──● <span class="highlight">Right</span>
+                   │              │
+                   ●──────●──────●
+             <span class="highlight">BottomLeft</span>  <span class="highlight">Bottom</span>  <span class="highlight">BottomRight</span>
+
+  Forward edges:  <span class="edge-fwd">East → West</span>  (straight horizontal)
+  Cyclic edges:   <span class="edge-cyc">North → South</span>  (A*-routed octilinear)
+  Diagonal ports: defined in AST, ready for future assignment
+</div>
+
+<h3>Two-Pass Routing</h3>
+
+<p><strong>Pass 1 — Forward edges</strong> (deterministic, O(n)):</p>
+<p>
+  Every forward edge exits the source's <strong>East port</strong> and enters the target's
+  <strong>West port</strong> along a straight horizontal line at the source's Y-coordinate.
+  Zero turns. Zero crossings.
+</p>
+
+<p><strong>Pass 2 — Cyclic edges</strong> (A* with transit-map cost):</p>
+
+<div class="code-block">
+  <span class="cm">// A* cost function</span>
+  f(n) = g(n) + h(n) + T(n) + C(n)
+
+  g(n) = movement cost from start
+  h(n) = octile distance to goal
+  T(n) = turn_penalty * direction_changes   (<span class="num">~200</span> each)
+  C(n) = cross_penalty * occupied_cells     (<span class="num">~500</span> each)
+
+  <span class="cm">// Movement costs</span>
+  axis-aligned (E/W/N/S): <span class="num">10</span>
+  diagonal (NE/NW/SE/SW): <span class="num">14</span>
+
+  <span class="cm">// Octile heuristic</span>
+  <span class="kw">fn</span> <span class="fn">octile_distance</span>(a, b):
+      d = min(|dx|, |dy|)
+      <span class="kw">return</span> (|dx| + |dy| - d) * <span class="num">10</span> + d * <span class="num">14</span>
+</div>
+
+<h3>Grid Occupancy</h3>
+<p>
+  A 10px-resolution grid tracks which cells are occupied by nodes (3-cell-radius square)
+  and previously-routed edges. A* only traverses <code>is_free</code> cells — no overlapping
+  elements.
+</p>
+
+<h2>Phase 5 — Label Placement</h2>
+<p>
+  <strong>Node labels</strong> are centred inside the node rectangle.
+  <strong>Edge labels</strong> sit at the route midpoint, offset 12px above,
+  with <code>opacity="0.7"</code> for visual hierarchy.
+</p>
+<p>
+  The <code>AnchorSlot</code> enum defines all <strong>8 positions</strong> around each node:
+  <span class="badge">Top</span><span class="badge">Bottom</span><span class="badge">Left</span><span class="badge">Right</span>
+  <span class="badge">TopLeft</span><span class="badge">TopRight</span><span class="badge">BottomLeft</span><span class="badge">BottomRight</span>
+  A future collision-resolution pass could score each slot by edge-path intersection count
+  and pick the best one.
+</p>
+
+<h2>Phase 6 — SVG Output</h2>
+
+<h3>Z-Order (bottom to top)</h3>
+<ol style="color: #94a3b8; font-size: 13px; margin-left: 20px; line-height: 2;">
+  <li>Background fill (viewport rectangle)</li>
+  <li>Title text (if any)</li>
+  <li>Edge paths — stroke-only, dashed for cyclic</li>
+  <li>Edge labels — midpoint text, 0.7 opacity</li>
+  <li>Node rectangles — filled + stroked, rounded corners</li>
+  <li>Node labels — centred inside each node</li>
+</ol>
+
+<h3>Auto-Bounding Box</h3>
+<p>
+  <code>compute_bounds()</code> scans every node position and edge route point,
+  adds 40px padding, and sets <code>viewBox</code> dynamically. The SVG fits its
+  content exactly — no wasted space, no clipping.
+</p>
+
+<h3>Theme System</h3>
+
+<table>
+  <tr>
+    <th>Property</th>
+    <th><span class="pill pill-transit">Transit</span></th>
+    <th><span class="pill pill-ember">Ember</span></th>
+    <th><span class="pill pill-forest">Forest</span></th>
+    <th><span class="pill pill-light">Light</span></th>
+    <th><span class="pill pill-mono">Mono</span></th>
+  </tr>
+  <tr><td>Background</td><td><code>#1A1A2E</code></td><td><code>#1C1410</code></td><td><code>#0F1A14</code></td><td><code>#F5F5F0</code></td><td><code>#111112</code></td></tr>
+  <tr><td>Node fill</td><td><code>#16213E</code></td><td><code>#2A1D16</code></td><td><code>#16251D</code></td><td><code>#FFFFFF</code></td><td><code>#1C1C1E</code></td></tr>
+  <tr><td>Node stroke</td><td><code>#4A90D9</code></td><td><code>#D4803A</code></td><td><code>#3D9B6B</code></td><td><code>#4A6FA5</code></td><td><code>#888899</code></td></tr>
+  <tr><td>Forward edge</td><td><code>#4A90D9</code></td><td><code>#D4803A</code></td><td><code>#3D9B6B</code></td><td><code>#4A6FA5</code></td><td><code>#888899</code></td></tr>
+  <tr><td>Cyclic edge</td><td><code>#E67E22</code></td><td><code>#E8A838</code></td><td><code>#7CC49E</code></td><td><code>#C06030</code></td><td><code>#BBBBC8</code></td></tr>
+  <tr><td>Label</td><td><code>#E0E0E0</code></td><td><code>#E8D5C0</code></td><td><code>#CDE0D5</code></td><td><code>#2C2C2E</code></td><td><code>#D0D0D6</code></td></tr>
+</table>
+
+<p>Cyclic edges always render with <code>stroke-dasharray="6,4"</code> (dashed).</p>
+
+<h2>Why 8 Ports = Beautiful Graphs</h2>
+
+<div class="diagram-grid">
+  <div class="diagram-card">
+    <h4>Diamond + Feedback</h4>
+    <img src="../rust/assets/diagrams/octovia-diamond.svg" alt="Diamond feedback diagram" />
+  </div>
+  <div class="diagram-card" style="display:flex;flex-direction:column;justify-content:center;">
+    <p style="font-size:12px;line-height:2;margin:0;">
+      ✅ <strong>Planarity</strong> — bounded edge density<br>
+      ✅ <strong>Ordering</strong> — forward uses E/W, cyclic uses N/S<br>
+      ✅ <strong>Octilinearity</strong> — only 0&deg;/45&deg;/90&deg;/135&deg; angles<br>
+      ✅ <strong>Separability</strong> — A* always finds clean paths for cycles<br>
+      ✅ <strong>Readability</strong> — forward edges never turn
+    </p>
+  </div>
+</div>
+
+<h2>Module Dependency Graph</h2>
+
+<div class="code-block">
+  <span class="fn">lib.rs</span>                    <span class="cm">// orchestrates 6-phase pipeline</span>
+  ├── <span class="ty">ast.rs</span>             <span class="cm">// types, enums, themes — zero dependencies</span>
+  ├── <span class="ty">parser.rs</span>          <span class="cm">// depends on ast + nom</span>
+  ├── <span class="ty">measure.rs</span>         <span class="cm">// depends on ast + cosmic-text</span>
+  ├── <span class="ty">layout.rs</span>          <span class="cm">// depends on ast + measure constants</span>
+  ├── <span class="ty">routing.rs</span>         <span class="cm">// depends on ast + layout + pathfinding</span>
+  ├── <span class="ty">svg_output.rs</span>      <span class="cm">// depends on ast — pure serialisation</span>
+  └── <span class="ty">wasm.rs</span>            <span class="cm">// depends on all modules + wasm-bindgen</span>
+</div>
+
+<p>Each module is independently testable — <strong>80 total tests</strong> covering every phase.</p>
+
+<hr />
+
+<h2>Playground Examples</h2>
+
+<p>
+  Try these in the <strong><a href="http://localhost:5173" style="color:#7dd3fc;">Octovia Playground</a></strong>:
+</p>
+
+<div class="diagram-grid">
+  <div class="diagram-card">
+    <h4>Simple chain</h4>
+    <div class="code-block" style="margin:0;">
+theme: transit
+title: Happy Path
+
+Idle -> Active : recheck
+Active -> Processing : submit
+Processing -> Done : complete
+    </div>
+  </div>
+  <div class="diagram-card">
+    <h4>Triangle cycle</h4>
+    <div class="code-block" style="margin:0;">
+theme: ember
+title: Back-Edge
+
+A -> B : forward_1
+B -> C : forward_2
+C -> A : cycle_back
+    </div>
+  </div>
+  <div class="diagram-card">
+    <h4>Diamond feedback</h4>
+    <div class="code-block" style="margin:0;">
+theme: forest
+title: Diamond
+
+Entry -> Fetch : begin
+Entry -> Cache : check
+Fetch -> Parse : raw_ok
+Cache -> Parse : cached
+Parse -> Store : parsed
+Store -> Entry : feedback
+    </div>
+  </div>
+  <div class="diagram-card">
+    <h4>Pipeline itself</h4>
+    <div class="code-block" style="margin:0;">
+theme: transit
+title: Octovia Pipeline
+
+Parse -> Measure : text_extents
+Measure -> Layout : node_size
+Layout -> Route : positions
+Route -> Label : routes
+Label -> SVG : anchors
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  Octovia &mdash; MIT License &mdash; Generated by Octovia 0.1.0
+</div>
+
+</div>
+</body>
+</html>

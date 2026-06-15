@@ -1,0 +1,21 @@
+# Rust build artifacts
+target/
+
+# Generated example SVGs
+temp/
+!temp/.gitkeep
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS cruft
+.DS_Store
+*.DS_Store
+
+# Cargo lock is committed for library crates
+# (remove this line if you make it a binary-only crate)
+# Cargo.lock is intentionally kept

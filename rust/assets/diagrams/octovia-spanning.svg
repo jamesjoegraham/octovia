@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="12 12 580 330" width="580" height="330" style="background-color: #1A1A2E">
+  <text x="302" y="42" text-anchor="middle" fill="#C0C0C0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="18" font-weight="600">Spanning Tree + Back-Edge</text>
+  <path id="edge-0" d="M 502 252 L 502 102" fill="none" stroke="#E67E22" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6,4" />
+  <path id="edge-1" d="M 502 102 L 302 102" fill="none" stroke="#E67E22" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6,4" />
+  <path id="edge-2" d="M 302 102 L 102 102" fill="none" stroke="#E67E22" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6,4" />
+  <path id="edge-3" d="M 330 100 L 340 100 L 350 100 L 360 100 L 370 100 L 380 100 L 390 100 L 400 100 L 410 100 L 420 100 L 430 100 L 440 100 L 450 100 L 460 100 L 470 100" fill="none" stroke="#4A90D9" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+  <text id="elabel-0" x="502" y="90" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="12" opacity="0.7">bfs</text>
+  <text id="elabel-1" x="302" y="90" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="12" opacity="0.7">bfs</text>
+  <text id="elabel-2" x="102" y="90" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="12" opacity="0.7">bfs</text>
+  <text id="elabel-3" x="400" y="88" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="12" opacity="0.7">cyclic_back</text>
+  <rect id="node-D" x="72" y="72" width="60" height="60" rx="8" ry="8" fill="#16213E" stroke="#4A90D9" stroke-width="2.0"/>
+  <text id="label-D" x="102" y="102" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="13">D</text>
+  <rect id="node-C" x="272" y="72" width="60" height="60" rx="8" ry="8" fill="#16213E" stroke="#4A90D9" stroke-width="2.0"/>
+  <text id="label-C" x="302" y="102" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="13">C</text>
+  <rect id="node-B" x="472" y="72" width="60" height="60" rx="8" ry="8" fill="#16213E" stroke="#4A90D9" stroke-width="2.0"/>
+  <text id="label-B" x="502" y="102" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="13">B</text>
+  <rect id="node-A" x="472" y="222" width="60" height="60" rx="8" ry="8" fill="#16213E" stroke="#4A90D9" stroke-width="2.0"/>
+  <text id="label-A" x="502" y="252" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="13">A</text>
+</svg>

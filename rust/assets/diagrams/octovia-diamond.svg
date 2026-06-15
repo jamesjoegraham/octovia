@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="7 7 590 340" width="590" height="340" style="background-color: #1A1A2E">
+  <text x="302" y="37" text-anchor="middle" fill="#C0C0C0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="18" font-weight="600">Diamond + Feedback</text>
+  <path id="edge-0" d="M 502 252 L 102 102" fill="none" stroke="#E67E22" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6,4" />
+  <path id="edge-1" d="M 530 250 L 520 250 L 510 250 L 500 250 L 490 250 L 480 250 L 470 250 L 460 250 L 450 250 L 440 250 L 430 250 L 420 250 L 410 250 L 400 250 L 390 250 L 380 250 L 370 250 L 360 250 L 350 250 L 340 250 L 330 250 L 320 250 L 310 250 L 300 250 L 290 250 L 280 250 L 270 250" fill="none" stroke="#4A90D9" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+  <path id="edge-2" d="M 130 100 L 140 100 L 150 100 L 160 100 L 170 100 L 180 100 L 190 100 L 200 100 L 210 100 L 220 100 L 230 100 L 240 100 L 250 100 L 260 100 L 270 100" fill="none" stroke="#4A90D9" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+  <path id="edge-3" d="M 302 252 L 302 102" fill="none" stroke="#E67E22" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6,4" />
+  <path id="edge-4" d="M 330 100 L 340 100 L 350 100 L 360 100 L 370 100 L 380 100 L 390 100 L 400 100 L 410 100 L 420 100 L 430 100 L 440 100 L 450 100 L 460 100 L 470 100" fill="none" stroke="#4A90D9" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+  <path id="edge-5" d="M 530 100 L 520 100 L 510 100 L 500 100 L 490 100 L 480 100 L 470 100" fill="none" stroke="#4A90D9" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+  <text id="elabel-0" x="102" y="90" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="12" opacity="0.7">begin</text>
+  <text id="elabel-1" x="400" y="238" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="12" opacity="0.7">check</text>
+  <text id="elabel-2" x="200" y="88" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="12" opacity="0.7">raw_ok</text>
+  <text id="elabel-3" x="302" y="90" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="12" opacity="0.7">cached</text>
+  <text id="elabel-4" x="400" y="88" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="12" opacity="0.7">parsed</text>
+  <text id="elabel-5" x="500" y="88" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="12" opacity="0.7">feedback</text>
+  <rect id="node-Fetch" x="67" y="72" width="71" height="60" rx="8" ry="8" fill="#16213E" stroke="#4A90D9" stroke-width="2.0"/>
+  <text id="label-Fetch" x="102" y="102" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="13">Fetch</text>
+  <rect id="node-Entry" x="467" y="222" width="71" height="60" rx="8" ry="8" fill="#16213E" stroke="#4A90D9" stroke-width="2.0"/>
+  <text id="label-Entry" x="502" y="252" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="13">Entry</text>
+  <rect id="node-Cache" x="267" y="222" width="71" height="60" rx="8" ry="8" fill="#16213E" stroke="#4A90D9" stroke-width="2.0"/>
+  <text id="label-Cache" x="302" y="252" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="13">Cache</text>
+  <rect id="node-Parse" x="267" y="72" width="71" height="60" rx="8" ry="8" fill="#16213E" stroke="#4A90D9" stroke-width="2.0"/>
+  <text id="label-Parse" x="302" y="102" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="13">Parse</text>
+  <rect id="node-Store" x="467" y="72" width="71" height="60" rx="8" ry="8" fill="#16213E" stroke="#4A90D9" stroke-width="2.0"/>
+  <text id="label-Store" x="502" y="102" text-anchor="middle" dominant-baseline="central" fill="#E0E0E0" font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace" font-size="13">Store</text>
+</svg>

@@ -1,0 +1,14 @@
+@import "tailwindcss";
+@plugin "daisyui";
+
+/* Firefox scrollbar (thin) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a2a2e transparent;
+}
+
+/* Selection */
+::selection {
+  background: #a0a0b0;
+  color: #0d0d10;
+}
