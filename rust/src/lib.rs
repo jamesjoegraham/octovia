@@ -168,7 +168,10 @@ mod integration_tests {
 
     #[test]
     fn test_octo_render_with_theme() {
-        let dsl = "A -> B\n";
+        // Use a labelled edge so each theme's `bg` colour appears in the
+        // edge-label halo stroke (the SVG canvas itself defaults to
+        // `transparent` and is independent of the theme).
+        let dsl = "A -> B : go\n";
         // Default theme (transit)
         let svg_default = octo_render(dsl, None).unwrap();
         assert!(svg_default.contains("#1A1A2E"));

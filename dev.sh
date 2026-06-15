@@ -45,4 +45,4 @@ cp \
     "$SITE_PKG_DIR/"
 
 echo ">> Launching Vite dev server..."
-exec npm --prefix "$SITE_DIR" run dev -- --host "${EXTRA_ARGS[@]}"
+exec npm --prefix "$SITE_DIR" run dev -- --host

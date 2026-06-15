@@ -22,7 +22,7 @@ use nom::{
     IResult,
 };
 
-use crate::ast::{resolve_theme, Diagram, Edge, Node, ThemeColors, Viewport};
+use crate::ast::{resolve_theme, Background, Diagram, Edge, Node, ThemeColors, Viewport};
 
 // ---------------------------------------------------------------------------
 // Helper combinators
@@ -125,6 +125,7 @@ fn line(input: &str) -> IResult<&str, Line> {
 pub fn parse_dsl(input: &str) -> Result<Diagram, String> {
     let mut title: Option<String> = None;
     let mut theme: Option<ThemeColors> = None;
+    let mut background: Background = Background::Transparent;
     // Insertion-order node tracking: `nodes_order` preserves declaration order
     // (load-bearing for deterministic, narrative-first layout); `seen` is just
     // for O(1) dedupe membership.
@@ -151,6 +152,22 @@ pub fn parse_dsl(input: &str) -> Result<Diagram, String> {
                 resolve_theme(theme_name)
                     .ok_or_else(|| format!("Unknown theme: '{theme_name}'. Use a valid theme name (run without theme: to see defaults)."))?,
             );
+            continue;
+        }
+
+        // Try to parse as background colour. Two forms are accepted:
+        //   * `background`              → use the active theme's `bg`
+        //   * `background: <css colour>` → use that explicit value
+        //                                  (or the literal `transparent`/`theme`)
+        if trimmed == "background" {
+            background = Background::Theme;
+            continue;
+        }
+        if trimmed.starts_with("background:") {
+            let value = trimmed["background:".len()..].trim();
+            if !value.is_empty() {
+                background = Background::parse_value(value);
+            }
             continue;
         }
 
@@ -207,6 +224,7 @@ pub fn parse_dsl(input: &str) -> Result<Diagram, String> {
         title,
         theme: theme.unwrap_or_default(),
         viewport: Viewport::default(),
+        background,
     })
 }
 
@@ -220,6 +238,8 @@ struct JsonDiagram {
     title: Option<String>,
     #[serde(default)]
     theme: Option<String>,
+    #[serde(default)]
+    background: Option<String>,
     states: Vec<String>,
     transitions: Vec<JsonTransition>,
     viewport: Option<JsonViewport>,
@@ -315,6 +335,10 @@ pub fn parse_json(json: &str) -> Result<Diagram, String> {
         title: jd.title,
         theme: jd.theme.and_then(|t| resolve_theme(&t)).unwrap_or_default(),
         viewport,
+        background: jd
+            .background
+            .map(|s| Background::parse_value(&s))
+            .unwrap_or_default(),
     })
 }
 
@@ -518,5 +542,71 @@ mod tests {
         let diagram = parse_dsl(input).unwrap();
         assert_eq!(diagram.theme.bg, "#F5F5F0");
         assert_eq!(diagram.title.as_deref(), Some("My Diagram"));
+    }
+
+    #[test]
+    fn test_parse_background_default_is_transparent() {
+        let diagram = parse_dsl("A -> B\n").unwrap();
+        assert_eq!(diagram.background, Background::Transparent);
+    }
+
+    #[test]
+    fn test_parse_background_directive() {
+        let diagram = parse_dsl("background: #112233\nA -> B\n").unwrap();
+        assert_eq!(diagram.background, Background::Custom("#112233".to_string()));
+    }
+
+    #[test]
+    fn test_parse_background_directive_named_color() {
+        let diagram = parse_dsl("background: white\nA -> B\n").unwrap();
+        assert_eq!(diagram.background, Background::Custom("white".to_string()));
+    }
+
+    #[test]
+    fn test_parse_background_bare_means_theme() {
+        let diagram = parse_dsl("background\nA -> B\n").unwrap();
+        assert_eq!(diagram.background, Background::Theme);
+    }
+
+    #[test]
+    fn test_parse_background_bare_with_theme_directive() {
+        let diagram = parse_dsl("theme: ember\nbackground\nA -> B\n").unwrap();
+        assert_eq!(diagram.background, Background::Theme);
+        // Theme.bg for ember is #1C1410.
+        assert_eq!(diagram.background.resolve(&diagram.theme), "#1C1410");
+    }
+
+    #[test]
+    fn test_parse_background_explicit_transparent() {
+        let diagram = parse_dsl("background: transparent\nA -> B\n").unwrap();
+        assert_eq!(diagram.background, Background::Transparent);
+    }
+
+    #[test]
+    fn test_parse_background_value_theme_keyword() {
+        let diagram = parse_dsl("background: theme\nA -> B\n").unwrap();
+        assert_eq!(diagram.background, Background::Theme);
+    }
+
+    #[test]
+    fn test_parse_json_background_field() {
+        let json = r#"{
+            "background": "transparent",
+            "states": ["A", "B"],
+            "transitions": [{"from": "A", "to": "B"}]
+        }"#;
+        let diagram = parse_json(json).unwrap();
+        assert_eq!(diagram.background, Background::Transparent);
+    }
+
+    #[test]
+    fn test_parse_json_background_theme_keyword() {
+        let json = r#"{
+            "background": "theme",
+            "states": ["A", "B"],
+            "transitions": [{"from": "A", "to": "B"}]
+        }"#;
+        let diagram = parse_json(json).unwrap();
+        assert_eq!(diagram.background, Background::Theme);
     }
 }

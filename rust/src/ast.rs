@@ -258,6 +258,48 @@ pub fn default_theme() -> ThemeColors {
 // Document / diagram
 // ---------------------------------------------------------------------------
 
+/// Canvas background mode for the rendered SVG.
+///
+/// This is intentionally separate from the theme — the theme's `bg` is still
+/// used for label halos and other opaque-on-canvas effects, while this enum
+/// controls only the outermost `<svg style="background-color: ...">`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Background {
+    /// No canvas fill — the SVG renders against whatever sits behind it.
+    #[default]
+    Transparent,
+    /// Use the active theme's `bg` colour. Resolved at render time so a
+    /// theme override applied after parsing still takes effect.
+    Theme,
+    /// An explicit CSS colour (hex, rgb(...), named colour, etc.).
+    Custom(String),
+}
+
+impl Background {
+    /// Parse a CLI / DSL value into a `Background`.
+    ///
+    /// - `"transparent"` (case-insensitive) → `Transparent`
+    /// - `"theme"` (case-insensitive) → `Theme`
+    /// - anything else → `Custom(value)`
+    pub fn parse_value(value: &str) -> Self {
+        let trimmed = value.trim();
+        match trimmed.to_lowercase().as_str() {
+            "transparent" => Background::Transparent,
+            "theme" => Background::Theme,
+            _ => Background::Custom(trimmed.to_string()),
+        }
+    }
+
+    /// Resolve to the concrete CSS colour string used in the SVG output.
+    pub fn resolve<'a>(&'a self, theme: &'a ThemeColors) -> &'a str {
+        match self {
+            Background::Transparent => "transparent",
+            Background::Theme => &theme.bg,
+            Background::Custom(s) => s.as_str(),
+        }
+    }
+}
+
 /// A complete state-machine diagram ready for rendering.
 #[derive(Debug, Clone)]
 pub struct Diagram {
@@ -268,6 +310,8 @@ pub struct Diagram {
     pub viewport: Viewport,
     /// Colour theme for rendering — now data-driven.
     pub theme: ThemeColors,
+    /// SVG canvas background. Defaults to `Transparent`.
+    pub background: Background,
 }
 
 impl Default for ThemeColors {
@@ -396,6 +440,7 @@ mod tests {
             title: None,
             viewport: Viewport::default(),
             theme: ThemeColors::default(),
+            background: Background::default(),
         }
     }
 
@@ -433,6 +478,7 @@ mod tests {
             title: None,
             viewport: Viewport::default(),
             theme: ThemeColors::default(),
+            background: Background::default(),
         };
         assert!(d.node("anything").is_none());
         assert!(d.adjacency().is_empty());
@@ -466,5 +512,38 @@ mod tests {
         let v: Viewport = Default::default();
         assert_eq!(v.width, 1200);
         assert_eq!(v.height, 800);
+    }
+
+    #[test]
+    fn test_background_default_is_transparent() {
+        let bg = Background::default();
+        assert_eq!(bg, Background::Transparent);
+        let theme = default_theme();
+        assert_eq!(bg.resolve(&theme), "transparent");
+    }
+
+    #[test]
+    fn test_background_theme_resolves_to_theme_bg() {
+        let theme = default_theme();
+        assert_eq!(Background::Theme.resolve(&theme), theme.bg.as_str());
+    }
+
+    #[test]
+    fn test_background_custom_resolves_verbatim() {
+        let theme = default_theme();
+        let bg = Background::Custom("#abcdef".to_string());
+        assert_eq!(bg.resolve(&theme), "#abcdef");
+    }
+
+    #[test]
+    fn test_background_parse_value() {
+        assert_eq!(Background::parse_value("transparent"), Background::Transparent);
+        assert_eq!(Background::parse_value("  Transparent  "), Background::Transparent);
+        assert_eq!(Background::parse_value("theme"), Background::Theme);
+        assert_eq!(Background::parse_value("THEME"), Background::Theme);
+        assert_eq!(
+            Background::parse_value("#112233"),
+            Background::Custom("#112233".to_string())
+        );
     }
 }

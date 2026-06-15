@@ -380,6 +380,11 @@ pub fn render_svg(diagram: &Diagram) -> String {
     let vx = min_x.saturating_sub(40);
     let vy = min_y.saturating_sub(40);
 
+    // Resolve canvas background. Defaults to "transparent" so the SVG can
+    // be embedded over arbitrary host backgrounds; users can opt in to the
+    // theme's `bg` (or any custom CSS colour) via `Diagram::background`.
+    let canvas_bg = diagram.background.resolve(&diagram.theme);
+
     // SVG open + background
     svg.push_str(&format!(
         r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vx} {vy} {vw} {vh}" width="{vw}" height="{vh}" style="background-color: {bg}">"#,
@@ -387,7 +392,7 @@ pub fn render_svg(diagram: &Diagram) -> String {
         vy = vy,
         vw = vw,
         vh = vh,
-        bg = colors.bg,
+        bg = canvas_bg,
     ));
     svg.push('\n');
 
@@ -481,7 +486,7 @@ fn compute_bounds(diagram: &Diagram) -> (i32, i32, i32, i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Diagram, Node, NodeSize, TextExtents, ThemeColors, Viewport};
+    use crate::ast::{Background, Diagram, Node, NodeSize, TextExtents, ThemeColors, Viewport};
     use crate::layout::layout_backbone;
     use crate::measure::measure_diagram;
     use crate::parser::parse_dsl;
@@ -525,12 +530,14 @@ mod tests {
             title: None,
             viewport: Viewport::default(),
             theme: ThemeColors::default(),
+            background: Background::default(),
         };
         let svg = render_svg(&d);
         assert!(svg.starts_with("<svg"));
         assert!(svg.ends_with("</svg>"));
         assert!(svg.contains("viewBox"));
-        assert!(svg.contains("background-color"));
+        // Default canvas background is transparent.
+        assert!(svg.contains("background-color: transparent"));
     }
 
     #[test]
@@ -562,6 +569,7 @@ mod tests {
             title: Some("Title & <special> \"chars\"".into()),
             viewport: Viewport::default(),
             theme: ThemeColors::default(),
+            background: Background::default(),
         };
         let svg = render_svg(&d);
         assert!(svg.contains("&amp;"));
@@ -600,28 +608,28 @@ mod tests {
 
     #[test]
     fn test_render_theme_colors_applied() {
-        let mut d = parse_dsl("A -> B\n").unwrap();
+        let mut d = parse_dsl("A -> B : go\n").unwrap();
         let ember = ThemeColors::from_str("ember").unwrap();
         d.theme = ember;
         measure_diagram(&mut d);
         layout_backbone(&mut d);
         route_all_edges(&mut d);
         let svg = render_svg(&d);
-        // Ember uses warm copper tones
+        // Ember uses warm copper tones; bg appears in label halo stroke.
         assert!(svg.contains("#D4803A"), "ember forward edge color");
-        assert!(svg.contains("#1C1410"), "ember bg color");
+        assert!(svg.contains("#1C1410"), "ember bg color (label halo)");
     }
 
     #[test]
     fn test_render_light_theme() {
-        let mut d = parse_dsl("A -> B\n").unwrap();
+        let mut d = parse_dsl("A -> B : go\n").unwrap();
         let light = ThemeColors::from_str("light").unwrap();
         d.theme = light;
         measure_diagram(&mut d);
         layout_backbone(&mut d);
         route_all_edges(&mut d);
         let svg = render_svg(&d);
-        assert!(svg.contains("#F5F5F0"), "light bg");
+        assert!(svg.contains("#F5F5F0"), "light bg (label halo)");
         assert!(svg.contains("#2C2C2E"), "light label color");
     }
 
@@ -790,6 +798,49 @@ mod tests {
         assert!(
             label_line.contains(r##"stroke="#1A1A2E""##),
             "edge label halo must use bg colour: {label_line}"
+        );
+    }
+
+    #[test]
+    fn test_canvas_background_defaults_to_transparent() {
+        let mut d = parse_dsl("A -> B\n").unwrap();
+        measure_diagram(&mut d);
+        layout_backbone(&mut d);
+        route_all_edges(&mut d);
+        let svg = render_svg(&d);
+        assert!(
+            svg.contains("background-color: transparent"),
+            "default canvas background should be transparent"
+        );
+    }
+
+    #[test]
+    fn test_canvas_background_override_applied() {
+        let mut d = parse_dsl("A -> B\n").unwrap();
+        d.background = Background::Custom("#abcdef".to_string());
+        measure_diagram(&mut d);
+        layout_backbone(&mut d);
+        route_all_edges(&mut d);
+        let svg = render_svg(&d);
+        assert!(
+            svg.contains("background-color: #abcdef"),
+            "canvas background should honour the diagram.background override"
+        );
+    }
+
+    #[test]
+    fn test_canvas_background_theme_uses_theme_bg() {
+        let mut d = parse_dsl("A -> B\n").unwrap();
+        d.theme = ThemeColors::from_str("ember").unwrap();
+        d.background = Background::Theme;
+        measure_diagram(&mut d);
+        layout_backbone(&mut d);
+        route_all_edges(&mut d);
+        let svg = render_svg(&d);
+        // Ember bg is #1C1410 — it must show up in the SVG canvas style.
+        assert!(
+            svg.contains("background-color: #1C1410"),
+            "Background::Theme should render the theme.bg colour as the canvas"
         );
     }
 }

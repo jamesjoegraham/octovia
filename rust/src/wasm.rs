@@ -8,7 +8,7 @@
 
 use wasm_bindgen::prelude::*;
 
-use crate::ast::{resolve_theme, ThemeColors, Viewport};
+use crate::ast::{resolve_theme, Background, ThemeColors, Viewport};
 use crate::layout::layout_backbone;
 use crate::measure::measure_diagram;
 use crate::parser::{parse_dsl, parse_json};
@@ -22,6 +22,9 @@ use crate::svg_output::render_svg;
 /// * `viewport_width` - Optional viewport width in pixels (default: 1200).
 /// * `viewport_height` - Optional viewport height in pixels (default: 800).
 /// * `theme` - Optional theme string. Any theme id from themes.json (e.g. "transit", "ember", "forest", "ocean").
+/// * `background` - Optional SVG canvas background. Accepts `"transparent"`,
+///   `"theme"` (use the active theme's `bg`), or any CSS colour string.
+///   Defaults to `"transparent"`.
 ///
 /// # Returns
 /// An SVG string, or a JS error.
@@ -31,6 +34,7 @@ pub fn render_from_dsl(
     viewport_width: Option<u32>,
     viewport_height: Option<u32>,
     theme: Option<String>,
+    background: Option<String>,
 ) -> Result<String, JsError> {
     let mut diagram = parse_dsl(dsl).map_err(|e| JsError::new(&e))?;
 
@@ -46,6 +50,12 @@ pub fn render_from_dsl(
     if let Some(ref t) = theme {
         diagram.theme = resolve_theme(t)
             .ok_or_else(|| JsError::new(&format!("Unknown theme: '{t}'. See list_themes() for valid options.")))?;
+    }
+
+    // Override background if provided. Accepts the literals `transparent`
+    // and `theme`, or any CSS colour string.
+    if let Some(bg) = background {
+        diagram.background = Background::parse_value(&bg);
     }
 
     run_pipeline(&mut diagram)

@@ -49,6 +49,12 @@ struct Cli {
     #[arg(long, default_value = "transit")]
     theme: String,
 
+    /// SVG canvas background (`transparent`, `theme`, or any CSS colour).
+    /// Defaults to `transparent` when omitted; overrides any `background`
+    /// directive in the input file.
+    #[arg(long)]
+    background: Option<String>,
+
     /// List all available themes and exit.
     #[arg(long)]
     list_themes: bool,
@@ -126,6 +132,11 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    // --- Set background (CLI overrides any directive in the input) ---
+    if let Some(bg) = cli.background {
+        diagram.background = octovia::ast::Background::parse_value(&bg);
+    }
 
     // --- Run pipeline ---
     octovia::measure::measure_diagram(&mut diagram);
