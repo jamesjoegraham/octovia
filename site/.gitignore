@@ -13,11 +13,7 @@ dist-ssr
 *.local
 
 # Synced wasm-pack output (rebuilt via dev.sh / CI)
-src/octovia/octovia.js
-src/octovia/octovia.d.ts
-src/octovia/octovia_bg.wasm
-src/octovia/octovia_bg.wasm.d.ts
-src/octovia/package.json
+src/octovia/*
 
 # Editor directories and files
 .vscode/*
