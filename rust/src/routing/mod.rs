@@ -89,17 +89,32 @@ pub fn route_all_edges(diagram: &mut Diagram) {
             tgt_size,
             &candidates,
             &occupancy,
+            &diagram.edges[ei].from,
+            &diagram.edges[ei].to,
         );
 
         // Convert grid cells back to pixel coordinates and bookend with
         // the source / target centres so SVG `trim_route_to_node_boundaries`
-        // can clip the polyline cleanly to each rectangle's edge.
+        // can clip the polyline cleanly to each rectangle's edge. The
+        // bookend points are projected onto the port cell's axis so the
+        // entry/exit segment is strictly orthogonal — without that
+        // projection a 2-px jog appears whenever a node centre isn't
+        // a multiple of 10 px, and the trim clip produces a faintly
+        // diagonal "off-angle" entry into the node.
         let mut route: Vec<Point> = Vec::with_capacity(cells.len() + 2);
-        route.push(from);
+        if let Some(&(cx, cy)) = cells.first() {
+            route.push(snap_endpoint_to_cell_axis(from, cx, cy));
+        } else {
+            route.push(from);
+        }
         for (cx, cy) in &cells {
             route.push(Point::new(cx * 10, cy * 10));
         }
-        route.push(to);
+        if let Some(&(cx, cy)) = cells.last() {
+            route.push(snap_endpoint_to_cell_axis(to, cx, cy));
+        } else {
+            route.push(to);
+        }
         diagram.edges[ei].route = route;
         occupancy.occupy_path(&cells);
     }
@@ -134,9 +149,12 @@ pub fn route_all_edges(diagram: &mut Diagram) {
 /// resulting cell sequence — including the port cells themselves so
 /// the rendered polyline still terminates at the node boundary.
 ///
-/// Falls back to a direct port-to-port segment if no candidate yields
-/// a path; this preserves the previous "always emit something" contract
-/// for malformed or fully-walled-off layouts.
+/// Panics if no candidate yields a path. The previous "always emit
+/// something" contract silently fell back to a straight port-to-port
+/// line, which sliced through any node sitting between the two
+/// endpoints (the so-called "laser beam" bug). Panicking surfaces the
+/// underlying occupancy violation immediately during testing so it can
+/// be fixed at the source rather than papered over at the renderer.
 fn best_route(
     from: Point,
     to: Point,
@@ -144,10 +162,12 @@ fn best_route(
     tgt_size: crate::ast::NodeSize,
     candidates: &[(PortDirection, PortDirection)],
     occupancy: &GridOccupancy,
+    from_id: &str,
+    to_id: &str,
 ) -> Vec<(i32, i32)> {
     let mut best: Option<(u32, Vec<(i32, i32)>)> = None;
 
-    for &(src_port, tgt_port) in candidates.iter().take(3) {
+    for &(src_port, tgt_port) in candidates {
         let port_src = port_cell(from, src_size, src_port);
         let port_tgt = port_cell(to, tgt_size, tgt_port);
         let (sox, soy) = outward_offset(src_port);
@@ -170,22 +190,36 @@ fn best_route(
         }
     }
 
-    if let Some((_, full)) = best {
-        return full;
+    match best {
+        Some((_, full)) => full,
+        None => panic!(
+            "A* routing failed for edge {from_id} -> {to_id}: no candidate \
+             port pair yielded a path through the occupancy grid"
+        ),
     }
+}
 
-    // Last-resort fallback: connect the two primary ports directly.
-    let (src_port, tgt_port) = candidates[0];
-    vec![
-        port_cell(from, src_size, src_port),
-        port_cell(to, tgt_size, tgt_port),
-    ]
+/// Project a node-centre endpoint onto the axis shared with the
+/// adjacent port cell so the trim segment that bridges the centre to
+/// the port stays strictly orthogonal. Without this projection, any
+/// node whose centre coordinate isn't a multiple of 10 px produces a
+/// tiny diagonal jog where the polyline crosses the node boundary —
+/// the visible "off-angle" entry that the transit-map aesthetic
+/// can't tolerate.
+fn snap_endpoint_to_cell_axis(endpoint: Point, cell_x: i32, cell_y: i32) -> Point {
+    let port_px = cell_x * 10;
+    let port_py = cell_y * 10;
+    // The port cell sits on the node boundary in one axis and offset
+    // in the other; snap the endpoint to share the boundary axis
+    // (whichever has the smaller deviation from the endpoint).
+    if (endpoint.x - port_px).abs() <= (endpoint.y - port_py).abs() {
+        Point::new(port_px, endpoint.y)
+    } else {
+        Point::new(endpoint.x, port_py)
+    }
 }
 
 /// Rasterise an octilinear pixel polyline into the grid cells it covers.
-/// Consecutive waypoints in any router-emitted route differ by ±10 px in
-/// at most each axis, so a constant 10-px stride visits every cell along
-/// each segment without duplication.
 fn cells_along_polyline(route: &[Point]) -> Vec<(i32, i32)> {
     let mut out: Vec<(i32, i32)> = Vec::new();
     if route.is_empty() {

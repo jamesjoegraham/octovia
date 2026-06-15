@@ -30,16 +30,19 @@ pub(crate) fn port_cell(
     }
 }
 
-/// Unit-cell outward offset for a port, used to grow a 1-cell orthogonal
-/// stalk before A* takes over. Returning the cell *outside* the port
-/// guarantees the first segment of every route is a clean axis-aligned
-/// step rather than a 45° diagonal snapping straight into the node.
+/// Outward offset for a port, used to grow an orthogonal stalk before
+/// A* takes over. The stalk is projected `STALK_STEP` cells past the
+/// port so the search begins on terrain that is guaranteed to be clear
+/// of the node's padded margin — `port_cell` already sits one cell
+/// outside the margin, so a two-cell step lands the stalk two cells
+/// beyond the margin and well clear of neighbouring node blocks.
 pub(crate) fn outward_offset(direction: PortDirection) -> (i32, i32) {
+    const STALK_STEP: i32 = 2;
     match direction {
-        PortDirection::East => (1, 0),
-        PortDirection::West => (-1, 0),
-        PortDirection::North => (0, -1),
-        PortDirection::South => (0, 1),
+        PortDirection::East => (STALK_STEP, 0),
+        PortDirection::West => (-STALK_STEP, 0),
+        PortDirection::North => (0, -STALK_STEP),
+        PortDirection::South => (0, STALK_STEP),
     }
 }
 
@@ -101,30 +104,46 @@ pub(crate) fn forward_port_candidates(
 }
 
 /// Generate the candidate (source, target) port pairs for a *back-edge*.
-/// Back-edges must wrap around the layered backbone, so the canonical
-/// pair is South → North. Side approaches (East/West out of source) are
-/// included so the cost-based selector can pick a tighter U-turn when
-/// the natural channel below the diagram is congested.
+///
+/// Topological layout expands layers horizontally, so the band of empty
+/// canvas directly *underneath* every node is the most reliable routing
+/// channel in the diagram. We therefore drive cyclic edges down through
+/// the South face on both ends as the primary plan and degrade through
+/// progressively less-preferred fallbacks: side-only U-bends, then a
+/// mixed South-out / side-in approach, and finally the original
+/// North-entry variants for the rare cases where the south channel is
+/// fully congested. Every candidate is real so a strict-orthogonal A*
+/// can always find a legal escape route.
 pub(crate) fn back_port_candidates(
     from: Point,
     to: Point,
 ) -> Vec<(PortDirection, PortDirection)> {
-    // The dominant assumption: the spanning tree pushed the target
-    // *above* the source visually. We always re-enter North; we just
-    // vary the exit side based on where the target sits horizontally.
+    use PortDirection::*;
+
+    // The near-side is the entry face closest to the source's
+    // horizontal position relative to the target — re-entering on the
+    // near side keeps the U-bend short.
     let dx = to.x - from.x;
-    let side_first = if dx >= 0 {
-        PortDirection::East
-    } else {
-        PortDirection::West
+    let near_side = if dx >= 0 { West } else { East };
+    let far_side = match near_side {
+        West => East,
+        _ => West,
     };
-    let side_second = match side_first {
-        PortDirection::East => PortDirection::West,
-        _ => PortDirection::East,
-    };
+
     vec![
-        (PortDirection::South, PortDirection::North),
-        (side_first, PortDirection::North),
-        (side_second, PortDirection::North),
+        // Preferred: down-and-up through the south channel.
+        (South, South),
+        (South, near_side),
+        (South, far_side),
+        // Side-only approaches when the bottom-out path is blocked.
+        (near_side, near_side),
+        (far_side, far_side),
+        (near_side, South),
+        (far_side, South),
+        // Last-resort: top-channel U-bend (the regression we wanted to
+        // avoid, but still better than a panic).
+        (South, North),
+        (North, North),
+        (North, South),
     ]
 }

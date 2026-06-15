@@ -15,13 +15,20 @@ use crate::ast::{Diagram, Point};
 const LANE_SPACING: i32 = 10;
 
 /// After all edges are routed, assign lane offsets to parallel forward
-/// edges that share the same straight segment. Each lane is offset by
-/// one grid cell (10 px) perpendicular to the edge direction. 45°
-/// diagonal connectors bridge from the node boundary to the lane.
-///
-/// Only horizontal and vertical forward edges are lanned — diagonal
-/// A* routes and cyclic U-bends keep their existing routing.
+/// edges that share the same straight segment **and** spread cyclic
+/// back-edges that share the same horizontal "bottom channel" so each
+/// one rides its own row instead of stacking onto the previous edge's
+/// line.
 pub(crate) fn assign_parallel_lanes(diagram: &mut Diagram) {
+    assign_forward_lanes(diagram);
+    assign_back_edge_lanes(diagram);
+}
+
+/// Group forward edges by their primary straight segment (horizontal
+/// edges group by y, vertical by x) and offset each parallel edge by
+/// one grid cell perpendicular to the run, with 45° diagonal
+/// connectors back to the original node boundary.
+fn assign_forward_lanes(diagram: &mut Diagram) {
     // Group forward edges by their primary straight segment.
     // Horizontal edges group by y; vertical edges group by x.
 
@@ -217,4 +224,148 @@ pub(crate) fn assign_parallel_lanes(diagram: &mut Diagram) {
             edge_mut.route = new_route;
         }
     }
+}
+
+/// Spread cyclic back-edges that share the same horizontal "bottom
+/// channel" into distinct lanes. Each back-edge's route contains a
+/// long horizontal run along the south of the diagram; when two such
+/// runs share a y-coordinate and an overlapping (or merely touching)
+/// x-range, A* has effectively painted them onto the same line and
+/// they read as a single edge. This pass detects those collisions and
+/// pushes each subsequent edge an extra grid cell further south,
+/// patching the vertical entry/exit connectors to remain orthogonal.
+fn assign_back_edge_lanes(diagram: &mut Diagram) {
+    struct Run {
+        edge_idx: usize,
+        start: usize,
+        end: usize,
+        y: i32,
+        x_lo: i32,
+        x_hi: i32,
+    }
+
+    let mut runs: Vec<Run> = Vec::new();
+    for (i, edge) in diagram.edges.iter().enumerate() {
+        if !edge.is_cyclic {
+            continue;
+        }
+        let Some((start, end)) = longest_horizontal_run(&edge.route) else {
+            continue;
+        };
+        // Don't touch a back-edge whose run sits at the very tail or
+        // head of the route — there'd be no connector to patch.
+        if start == 0 || end + 1 >= edge.route.len() {
+            continue;
+        }
+        let y = edge.route[start].y;
+        let x_lo = edge.route[start..=end].iter().map(|p| p.x).min().unwrap();
+        let x_hi = edge.route[start..=end].iter().map(|p| p.x).max().unwrap();
+        runs.push(Run { edge_idx: i, start, end, y, x_lo, x_hi });
+    }
+
+    // Group runs by shared y where the x-ranges overlap *or touch* at
+    // an endpoint — touching ranges still render as a single visual
+    // line through the shared point.
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    'outer: for ri in 0..runs.len() {
+        for group in groups.iter_mut() {
+            if runs[group[0]].y != runs[ri].y {
+                continue;
+            }
+            let touches = group.iter().any(|&gi| {
+                runs[ri].x_lo <= runs[gi].x_hi && runs[gi].x_lo <= runs[ri].x_hi
+            });
+            if touches {
+                group.push(ri);
+                continue 'outer;
+            }
+        }
+        groups.push(vec![ri]);
+    }
+
+    for group in &groups {
+        if group.len() < 2 {
+            continue;
+        }
+        // Stable order: by input edge index. The first edge in a group
+        // keeps its original y; each subsequent edge drops one extra
+        // lane to the south.
+        let mut sorted: Vec<usize> = group.clone();
+        sorted.sort_by_key(|&gi| runs[gi].edge_idx);
+
+        for (lane_k, &gi) in sorted.iter().enumerate() {
+            let dy = (lane_k as i32) * LANE_SPACING;
+            if dy == 0 {
+                continue;
+            }
+            let (start, end) = (runs[gi].start, runs[gi].end);
+            let route = &mut diagram.edges[runs[gi].edge_idx].route;
+            shift_horizontal_run_south(route, start, end, dy);
+        }
+    }
+}
+
+/// Find the longest sub-slice of `route` whose points share a common y
+/// coordinate. Returns the inclusive `(start, end)` indices, or `None`
+/// if no run of at least 3 points exists. Three is the minimum length
+/// where the run is long enough to be a "channel" rather than a stray
+/// kink in an otherwise vertical route.
+fn longest_horizontal_run(route: &[Point]) -> Option<(usize, usize)> {
+    if route.len() < 3 {
+        return None;
+    }
+    let mut best: Option<(usize, usize)> = None;
+    let mut run_start = 0;
+    for i in 1..=route.len() {
+        let end_of_run = i == route.len() || route[i].y != route[run_start].y;
+        if end_of_run {
+            let len = i - run_start;
+            if len >= 3 && best.is_none_or(|(s, e)| len > e - s + 1) {
+                best = Some((run_start, i - 1));
+            }
+            if i < route.len() {
+                run_start = i;
+            }
+        }
+    }
+    best
+}
+
+/// Shift `route[start..=end]` to a new y `dy` cells further south,
+/// inserting axis-aligned connectors at both ends so the polyline
+/// stays strictly orthogonal even when `route[start - 1]` or
+/// `route[end + 1]` doesn't lie directly above the shifted run.
+fn shift_horizontal_run_south(route: &mut Vec<Point>, start: usize, end: usize, dy: i32) {
+    if dy == 0 || start == 0 || end + 1 >= route.len() {
+        return;
+    }
+    let pre = route[start - 1];
+    let post = route[end + 1];
+    let sx = route[start].x;
+    let ex = route[end].x;
+    let new_y = route[start].y + dy;
+
+    let mut new_route: Vec<Point> = route[..start].to_vec();
+
+    // Connect `pre` to (sx, new_y). If pre already sits at x=sx we just
+    // need a longer vertical leg (no extra point). Otherwise insert an
+    // L-bend corner at (sx, pre.y) so the segment is two clean
+    // orthogonal legs.
+    if pre.x != sx && pre.y != new_y {
+        new_route.push(Point::new(sx, pre.y));
+    }
+
+    // The shifted run itself.
+    for i in start..=end {
+        new_route.push(Point::new(route[i].x, new_y));
+    }
+
+    // Connect (ex, new_y) back to `post`. Mirror logic for the post
+    // connector.
+    if post.x != ex && post.y != new_y {
+        new_route.push(Point::new(ex, post.y));
+    }
+
+    new_route.extend_from_slice(&route[end + 1..]);
+    *route = new_route;
 }
