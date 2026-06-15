@@ -25,13 +25,13 @@
       onclick={() => (page = 'home')}
     >Home</button>
     <button
-      class="btn btn-md join-item {page === 'playground' ? 'btn-active' : 'btn-ghost'}"
-      onclick={() => (page = 'playground')}
-    >Playground</button>
-    <button
       class="btn btn-md join-item {page === 'about' ? 'btn-active' : 'btn-ghost'}"
       onclick={() => (page = 'about')}
     >About</button>
+    <button
+      class="btn btn-md join-item {page === 'playground' ? 'btn-active' : 'btn-ghost'}"
+      onclick={() => (page = 'playground')}
+    >Playground</button>
   </div>
 
   {#if page === 'playground' || page === 'home'}
