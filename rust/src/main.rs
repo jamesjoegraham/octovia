@@ -4,6 +4,7 @@
 //!   octovia input.dsl                          → writes input.svg
 //!   octovia input.dsl -o output.svg
 //!   octovia input.dsl --width 800 --height 600
+//!   octovia input.dsl --theme ocean
 //!   octovia input.json --json                  # JSON-format input
 //!   cat input.dsl | octovia                    # pipe mode
 
@@ -44,13 +45,28 @@ struct Cli {
     #[arg(short, long)]
     stdout: bool,
 
-    /// Colour theme: transit, ember, forest, light, monochrome (default: transit).
+    /// Colour theme (default: transit). Run `octovia --list-themes` to see all.
     #[arg(long, default_value = "transit")]
     theme: String,
+
+    /// List all available themes and exit.
+    #[arg(long)]
+    list_themes: bool,
 }
 
 fn main() {
     let cli = Cli::parse();
+
+    // Handle --list-themes
+    if cli.list_themes {
+        let themes = octovia::ast::list_themes();
+        println!("Available themes:");
+        for (id, name) in &themes {
+            println!("  {id:20} {name}");
+        }
+        println!("\n{} themes total.", themes.len());
+        return;
+    }
 
     // --- Read input ---
     let (input_text, input_name): (String, Option<String>) = if let Some(ref path) = cli.input {
@@ -103,10 +119,10 @@ fn main() {
     };
 
     // --- Set theme ---
-    diagram.theme = match octovia::ast::Theme::from_str(&cli.theme) {
+    diagram.theme = match octovia::ast::resolve_theme(&cli.theme) {
         Some(t) => t,
         None => {
-            eprintln!("error: unknown theme '{}'. Options: transit, ember, forest, light, monochrome", cli.theme);
+            eprintln!("error: unknown theme '{}'. Use --list-themes to see all options.", cli.theme);
             std::process::exit(1);
         }
     };

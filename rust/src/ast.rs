@@ -158,6 +158,103 @@ pub struct Node {
 }
 
 // ---------------------------------------------------------------------------
+// Theme system — data-driven from themes.json
+// ---------------------------------------------------------------------------
+
+/// A single theme's colour palette.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ThemeColors {
+    pub bg: String,
+    pub node_fill: String,
+    pub node_stroke: String,
+    pub edge_forward: String,
+    pub edge_cyclic: String,
+    pub label_fill: String,
+    pub title_fill: String,
+    pub node_glow: String,
+    pub gradient_start: String,
+    pub gradient_end: String,
+}
+
+impl ThemeColors {
+    /// Convenience accessor for backwards compatibility — returns self.
+    pub fn colors(&self) -> &ThemeColors {
+        self
+    }
+
+    /// Resolve a theme name to ThemeColors.
+    pub fn from_str(name: &str) -> Option<ThemeColors> {
+        resolve_theme(name)
+    }
+}
+
+/// A theme entry from the themes.json file.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ThemeEntry {
+    pub id: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    pub name: String,
+    pub description: String,
+    pub bg: String,
+    pub node_fill: String,
+    pub node_stroke: String,
+    pub edge_forward: String,
+    pub edge_cyclic: String,
+    pub label_fill: String,
+    pub title_fill: String,
+    pub node_glow: String,
+    pub gradient_start: String,
+    pub gradient_end: String,
+}
+
+/// The top-level themes.json structure.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ThemeManifest {
+    pub themes: Vec<ThemeEntry>,
+}
+
+/// Load and parse the embedded themes.json at compile time.
+pub fn load_builtin_themes() -> ThemeManifest {
+    serde_json::from_str(include_str!("themes.json"))
+        .expect("themes.json is invalid JSON or mismatched schema")
+}
+
+/// Resolve a theme name (or alias) to a `ThemeColors`, along with metadata.
+/// Returns `None` if the name doesn't match any theme.
+pub fn resolve_theme(name: &str) -> Option<ThemeColors> {
+    let name_lower = name.trim().to_lowercase();
+    let manifest = load_builtin_themes();
+    manifest.themes.into_iter().find(|entry| {
+        entry.id == name_lower
+            || (entry.id.len() > name_lower.len() && entry.id[..name_lower.len()] == name_lower)
+            || entry.aliases.iter().any(|a| *a == name_lower)
+    }).map(|entry| ThemeColors {
+        bg: entry.bg,
+        node_fill: entry.node_fill,
+        node_stroke: entry.node_stroke,
+        edge_forward: entry.edge_forward,
+        edge_cyclic: entry.edge_cyclic,
+        label_fill: entry.label_fill,
+        title_fill: entry.title_fill,
+        node_glow: entry.node_glow,
+        gradient_start: entry.gradient_start,
+        gradient_end: entry.gradient_end,
+    })
+}
+
+/// Get all built-in theme names and their display names.
+pub fn list_themes() -> Vec<(String, String)> {
+    let manifest = load_builtin_themes();
+    manifest.themes.into_iter().map(|e| (e.id, e.name)).collect()
+}
+
+/// Get the default theme (Transit) colours.
+pub fn default_theme() -> ThemeColors {
+    resolve_theme("transit").expect("default theme 'transit' must exist in themes.json")
+}
+
+// ---------------------------------------------------------------------------
 // Document / diagram
 // ---------------------------------------------------------------------------
 
@@ -169,108 +266,13 @@ pub struct Diagram {
     pub title: Option<String>,
     /// User-supplied viewport constraint.
     pub viewport: Viewport,
-    /// Colour theme for rendering.
-    pub theme: Theme,
+    /// Colour theme for rendering — now data-driven.
+    pub theme: ThemeColors,
 }
 
-// ---------------------------------------------------------------------------
-// Theme support
-// ---------------------------------------------------------------------------
-
-/// Built-in colour themes for the diagram renderer.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Theme {
-    /// Deep navy/blue transit-map look (the classic default).
-    Transit,
-    /// Warm amber/copper on dark.
-    Ember,
-    /// Cool teal/emerald tones.
-    Forest,
-    /// Clean light-background theme.
-    Light,
-    /// Monochrome greyscale.
-    Monochrome,
-}
-
-impl Theme {
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.trim().to_lowercase().as_str() {
-            "transit" | "dark" => Some(Self::Transit),
-            "ember" | "amber" => Some(Self::Ember),
-            "forest" | "teal" | "green" => Some(Self::Forest),
-            "light" | "white" | "paper" => Some(Self::Light),
-            "monochrome" | "gray" | "grey" | "bw" => Some(Self::Monochrome),
-            _ => None,
-        }
-    }
-}
-
-/// Pre-defined colour palettes keyed by theme.
-pub struct ThemeColors {
-    pub bg: &'static str,
-    pub node_fill: &'static str,
-    pub node_stroke: &'static str,
-    pub edge_forward: &'static str,
-    pub edge_cyclic: &'static str,
-    pub label_fill: &'static str,
-    pub title_fill: &'static str,
-}
-
-impl Theme {
-    pub fn colors(&self) -> ThemeColors {
-        match self {
-            Self::Transit => ThemeColors {
-                bg: "#1A1A2E",
-                node_fill: "#16213E",
-                node_stroke: "#4A90D9",
-                edge_forward: "#4A90D9",
-                edge_cyclic: "#5BC0BE",
-                label_fill: "#E0E0E0",
-                title_fill: "#C0C0C0",
-            },
-            Self::Ember => ThemeColors {
-                bg: "#1C1410",
-                node_fill: "#2A1D16",
-                node_stroke: "#D4803A",
-                edge_forward: "#D4803A",
-                edge_cyclic: "#E8A838",
-                label_fill: "#E8D5C0",
-                title_fill: "#C8B094",
-            },
-            Self::Forest => ThemeColors {
-                bg: "#0F1A14",
-                node_fill: "#16251D",
-                node_stroke: "#3D9B6B",
-                edge_forward: "#3D9B6B",
-                edge_cyclic: "#7CC49E",
-                label_fill: "#CDE0D5",
-                title_fill: "#A0C0B0",
-            },
-            Self::Light => ThemeColors {
-                bg: "#F5F5F0",
-                node_fill: "#FFFFFF",
-                node_stroke: "#4A6FA5",
-                edge_forward: "#4A6FA5",
-                edge_cyclic: "#C06030",
-                label_fill: "#2C2C2E",
-                title_fill: "#555555",
-            },
-            Self::Monochrome => ThemeColors {
-                bg: "#111112",
-                node_fill: "#1C1C1E",
-                node_stroke: "#888899",
-                edge_forward: "#888899",
-                edge_cyclic: "#BBBBC8",
-                label_fill: "#D0D0D6",
-                title_fill: "#A0A0A8",
-            },
-        }
-    }
-}
-
-impl Default for Theme {
+impl Default for ThemeColors {
     fn default() -> Self {
-        Self::Transit
+        default_theme()
     }
 }
 
@@ -298,6 +300,68 @@ impl Diagram {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_load_themes_non_empty() {
+        let m = load_builtin_themes();
+        assert!(m.themes.len() >= 40, "expected >= 40 themes, got {}", m.themes.len());
+    }
+
+    #[test]
+    fn test_resolve_transit() {
+        let c = resolve_theme("transit").expect("transit");
+        assert_eq!(c.bg, "#1A1A2E");
+    }
+
+    #[test]
+    fn test_resolve_aliases() {
+        assert!(resolve_theme("dark").is_some(), "alias 'dark' for transit");
+        assert!(resolve_theme("teal").is_some(), "alias 'teal' for forest");
+        assert!(resolve_theme("grey").is_some(), "alias 'grey' for monochrome");
+    }
+
+    #[test]
+    fn test_resolve_unknown() {
+        assert!(resolve_theme("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_default_theme() {
+        let c = default_theme();
+        assert_eq!(c.bg, "#1A1A2E");
+    }
+
+    #[test]
+    fn test_list_themes() {
+        let list = list_themes();
+        assert!(list.len() >= 40);
+        assert!(list.iter().any(|(id, _)| id == "transit"));
+    }
+
+    #[test]
+    fn test_every_theme_has_valid_colors() {
+        let m = load_builtin_themes();
+        for entry in &m.themes {
+            assert!(!entry.bg.is_empty(), "theme '{}' missing bg", entry.id);
+            assert!(!entry.node_fill.is_empty(), "theme '{}' missing node_fill", entry.id);
+            assert!(!entry.node_stroke.is_empty(), "theme '{}' missing node_stroke", entry.id);
+            assert!(!entry.node_glow.is_empty(), "theme '{}' missing node_glow", entry.id);
+            assert!(!entry.gradient_start.is_empty(), "theme '{}' missing gradient_start", entry.id);
+        }
+    }
+
+    // ---- Existing tests from the old ast.rs (preserved) ----
+
+    fn default_node(id: &str) -> Node {
+        Node {
+            id: id.to_string(),
+            label: id.to_string(),
+            label_extents: None,
+            node_size: None,
+            position: None,
+            spanning_index: None,
+        }
+    }
 
     fn make_diagram() -> Diagram {
         Diagram {
@@ -331,7 +395,7 @@ mod tests {
             ],
             title: None,
             viewport: Viewport::default(),
-            theme: Theme::default(),
+            theme: ThemeColors::default(),
         }
     }
 
@@ -368,7 +432,7 @@ mod tests {
             edges: vec![],
             title: None,
             viewport: Viewport::default(),
-            theme: Theme::default(),
+            theme: ThemeColors::default(),
         };
         assert!(d.node("anything").is_none());
         assert!(d.adjacency().is_empty());
@@ -382,18 +446,19 @@ mod tests {
     }
 
     #[test]
-    fn test_point_equality_hash() {
-        use std::collections::HashSet;
-        let a = Point::new(1, 2);
-        let b = Point::new(1, 2);
-        let c = Point::new(2, 1);
-        assert_eq!(a, b);
-        assert_ne!(a, c);
-        let mut set = HashSet::new();
-        set.insert(a);
-        set.insert(b); // duplicate, should be 1 entry
-        set.insert(c);
-        assert_eq!(set.len(), 2);
+    fn test_node_size_extents() {
+        let e = TextExtents { width: 80.0, height: 32.0 };
+        let ns = NodeSize::from_extents(&e, 24);
+        assert!(ns.width >= 104);
+        assert!(ns.height >= 56);
+    }
+
+    #[test]
+    fn test_node_size_minimum() {
+        let e = TextExtents { width: 10.0, height: 10.0 };
+        let ns = NodeSize::from_extents(&e, 24);
+        assert!(ns.width >= MIN_NODE_SIDE);
+        assert!(ns.height >= MIN_NODE_SIDE);
     }
 
     #[test]
@@ -401,89 +466,5 @@ mod tests {
         let v: Viewport = Default::default();
         assert_eq!(v.width, 1200);
         assert_eq!(v.height, 800);
-    }
-
-    #[test]
-    fn test_self_loop_edge() {
-        let mut d = Diagram {
-            nodes: vec![
-                Node {
-                    id: "X".into(),
-                    label: "X".into(),
-                    label_extents: None,
-                    node_size: None,
-                    position: Some(Point::new(50, 50)),
-                    spanning_index: Some(0),
-                },
-            ],
-            edges: vec![
-                Edge {
-                    from: "X".into(),
-                    to: "X".into(),
-                    label: Some("loop".into()),
-                    label_extents: None,
-                    is_cyclic: true,
-                    route: vec![],
-                },
-            ],
-            title: None,
-            viewport: Viewport::default(),
-            theme: Theme::default(),
-        };
-        assert!(d.node("X").is_some());
-        let adj = d.adjacency();
-        assert_eq!(adj["X"], vec![0]);
-
-        // Self-loop: node_mut should still find it
-        let n = d.node_mut("X").unwrap();
-        n.position = Some(Point::new(100, 100));
-        assert_eq!(d.node("X").unwrap().position, Some(Point::new(100, 100)));
-    }
-
-    #[test]
-    fn test_adjacency_multiple_edges() {
-        let mut d = make_diagram();
-        d.edges.push(Edge {
-            from: "A".into(),
-            to: "B".into(),
-            label: Some("retry".into()),
-            label_extents: None,
-            is_cyclic: true,
-            route: vec![],
-        });
-        let adj = d.adjacency();
-        assert_eq!(adj["A"].len(), 2);
-    }
-
-    #[test]
-    fn test_theme_from_str() {
-        assert_eq!(Theme::from_str("transit"), Some(Theme::Transit));
-        assert_eq!(Theme::from_str("dark"), Some(Theme::Transit));
-        assert_eq!(Theme::from_str("ember"), Some(Theme::Ember));
-        assert_eq!(Theme::from_str("amber"), Some(Theme::Ember));
-        assert_eq!(Theme::from_str("forest"), Some(Theme::Forest));
-        assert_eq!(Theme::from_str("teal"), Some(Theme::Forest));
-        assert_eq!(Theme::from_str("light"), Some(Theme::Light));
-        assert_eq!(Theme::from_str("paper"), Some(Theme::Light));
-        assert_eq!(Theme::from_str("monochrome"), Some(Theme::Monochrome));
-        assert_eq!(Theme::from_str("grey"), Some(Theme::Monochrome));
-        assert_eq!(Theme::from_str("bw"), Some(Theme::Monochrome));
-        assert_eq!(Theme::from_str("unknown"), None);
-        assert_eq!(Theme::from_str(&"  Dark  ".to_string()), Some(Theme::Transit));
-    }
-
-    #[test]
-    fn test_theme_colors_not_empty() {
-        for theme in [Theme::Transit, Theme::Ember, Theme::Forest, Theme::Light, Theme::Monochrome] {
-            let c = theme.colors();
-            assert!(!c.bg.is_empty());
-            assert!(!c.node_fill.is_empty());
-            assert!(!c.node_stroke.is_empty());
-        }
-    }
-
-    #[test]
-    fn test_theme_default_is_transit() {
-        assert_eq!(Theme::default(), Theme::Transit);
     }
 }

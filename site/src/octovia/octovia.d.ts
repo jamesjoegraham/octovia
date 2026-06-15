@@ -8,7 +8,7 @@
  * * `dsl` - The text DSL string (sequence-first syntax).
  * * `viewport_width` - Optional viewport width in pixels (default: 1200).
  * * `viewport_height` - Optional viewport height in pixels (default: 800).
- * * `theme` - Optional theme string: "transit", "ember", "forest", "light", "monochrome".
+ * * `theme` - Optional theme string. Any theme id from themes.json (e.g. "transit", "ember", "forest", "ocean").
  *
  * # Returns
  * An SVG string, or a JS error.

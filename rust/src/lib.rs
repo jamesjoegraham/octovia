@@ -27,7 +27,7 @@ pub mod wasm;
 // Top-level convenience API
 // ---------------------------------------------------------------------------
 
-use ast::{Theme, Viewport};
+use ast::{ThemeColors, Viewport};
 use layout::layout_backbone;
 use measure::measure_diagram;
 use parser::parse_dsl;
@@ -46,7 +46,7 @@ pub fn octo_render(dsl: &str, viewport: Option<Viewport>) -> Result<String, Stri
 pub fn octo_render_with_theme(
     dsl: &str,
     viewport: Option<Viewport>,
-    theme: Option<Theme>,
+    theme: Option<ThemeColors>,
 ) -> Result<String, String> {
     let mut diagram = parse_dsl(dsl)?;
     if let Some(vp) = viewport {
@@ -174,12 +174,14 @@ mod integration_tests {
         assert!(svg_default.contains("#1A1A2E"));
 
         // Ember theme
-        let svg_ember = octo_render_with_theme(dsl, None, Some(Theme::Ember)).unwrap();
+        let ember = ThemeColors::from_str("ember").unwrap();
+        let svg_ember = octo_render_with_theme(dsl, None, Some(ember)).unwrap();
         assert!(svg_ember.contains("#1C1410"));
         assert!(svg_ember.contains("#D4803A"));
 
         // Forest theme
-        let svg_forest = octo_render_with_theme(dsl, None, Some(Theme::Forest)).unwrap();
+        let forest = ThemeColors::from_str("forest").unwrap();
+        let svg_forest = octo_render_with_theme(dsl, None, Some(forest)).unwrap();
         assert!(svg_forest.contains("#0F1A14"));
         assert!(svg_forest.contains("#3D9B6B"));
     }

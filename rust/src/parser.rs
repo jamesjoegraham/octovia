@@ -22,7 +22,7 @@ use nom::{
     IResult,
 };
 
-use crate::ast::{Diagram, Edge, Node, Theme, Viewport};
+use crate::ast::{resolve_theme, Diagram, Edge, Node, ThemeColors, Viewport};
 
 // ---------------------------------------------------------------------------
 // Helper combinators
@@ -124,7 +124,7 @@ fn line(input: &str) -> IResult<&str, Line> {
 /// Parse a text-format DSL string into a Diagram.
 pub fn parse_dsl(input: &str) -> Result<Diagram, String> {
     let mut title: Option<String> = None;
-    let mut theme: Option<Theme> = None;
+    let mut theme: Option<ThemeColors> = None;
     // Insertion-order node tracking: `nodes_order` preserves declaration order
     // (load-bearing for deterministic, narrative-first layout); `seen` is just
     // for O(1) dedupe membership.
@@ -148,8 +148,8 @@ pub fn parse_dsl(input: &str) -> Result<Diagram, String> {
         if trimmed.starts_with("theme:") {
             let theme_name = trimmed[6..].trim();
             theme = Some(
-                Theme::from_str(theme_name)
-                    .ok_or_else(|| format!("Unknown theme: '{theme_name}'. Options: transit, ember, forest, light, monochrome"))?,
+                resolve_theme(theme_name)
+                    .ok_or_else(|| format!("Unknown theme: '{theme_name}'. Use a valid theme name (run without theme: to see defaults)."))?,
             );
             continue;
         }
@@ -313,7 +313,7 @@ pub fn parse_json(json: &str) -> Result<Diagram, String> {
         nodes,
         edges,
         title: jd.title,
-        theme: jd.theme.and_then(|t| Theme::from_str(&t)).unwrap_or_default(),
+        theme: jd.theme.and_then(|t| resolve_theme(&t)).unwrap_or_default(),
         viewport,
     })
 }
@@ -486,14 +486,15 @@ mod tests {
     fn test_parse_theme_directive() {
         let input = "theme: ember\nA -> B\n";
         let diagram = parse_dsl(input).unwrap();
-        assert_eq!(diagram.theme, Theme::Ember);
+        assert_eq!(diagram.theme.bg, "#1C1410");
+        assert_eq!(diagram.theme.node_stroke, "#D4803A");
     }
 
     #[test]
     fn test_parse_theme_default_is_transit() {
         let input = "A -> B\n";
         let diagram = parse_dsl(input).unwrap();
-        assert_eq!(diagram.theme, Theme::Transit);
+        assert_eq!(diagram.theme.bg, "#1A1A2E");
     }
 
     #[test]
@@ -507,14 +508,15 @@ mod tests {
     fn test_parse_theme_case_insensitive() {
         let input = "theme:  Forest  \nA -> B\n";
         let diagram = parse_dsl(input).unwrap();
-        assert_eq!(diagram.theme, Theme::Forest);
+        assert_eq!(diagram.theme.node_fill, "#16251D");
+        assert_eq!(diagram.theme.node_stroke, "#3D9B6B");
     }
 
     #[test]
     fn test_parse_theme_with_title() {
         let input = "theme: light\ntitle: My Diagram\nA -> B\n";
         let diagram = parse_dsl(input).unwrap();
-        assert_eq!(diagram.theme, Theme::Light);
+        assert_eq!(diagram.theme.bg, "#F5F5F0");
         assert_eq!(diagram.title.as_deref(), Some("My Diagram"));
     }
 }
