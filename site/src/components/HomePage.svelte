@@ -5,6 +5,8 @@
   import CloseIcon from './icons/CloseIcon.svelte';
   import GithubIcon from './icons/GithubIcon.svelte';
 
+  const version = __OCTOVIA_VERSION__;
+
   type RenderFn = (d: string, w?: number | null, h?: number | null) => string;
 
   let {
@@ -111,7 +113,7 @@
             Octovia
           </h1>
           <span class="badge badge-primary badge-outline badge-sm mt-2 hidden sm:inline-flex font-mono">
-            v0.1.0
+            v{version}
           </span>
         </div>
         
