@@ -224,7 +224,7 @@ impl Theme {
                 node_fill: "#16213E",
                 node_stroke: "#4A90D9",
                 edge_forward: "#4A90D9",
-                edge_cyclic: "#E67E22",
+                edge_cyclic: "#5BC0BE",
                 label_fill: "#E0E0E0",
                 title_fill: "#C0C0C0",
             },

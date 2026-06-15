@@ -33,11 +33,11 @@ const ARROW_CYCLIC_ID: &str = "octovia-arrow-cyclic";
 fn arrow_defs(colors: &ThemeColors) -> String {
     format!(
         r#"  <defs>
-    <marker id="{fwd}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="{fwd_color}"/>
+    <marker id="{fwd}" viewBox="0 0 14 14" refX="12" refY="7" markerWidth="12" markerHeight="12" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+      <path d="M 0 0 L 14 7 L 0 14 z" fill="{fwd_color}"/>
     </marker>
-    <marker id="{cyc}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="{cyc_color}"/>
+    <marker id="{cyc}" viewBox="0 0 14 14" refX="12" refY="7" markerWidth="12" markerHeight="12" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+      <path d="M 0 0 L 14 7 L 0 14 z" fill="{cyc_color}"/>
     </marker>
   </defs>"#,
         fwd = ARROW_FORWARD_ID,
@@ -101,7 +101,7 @@ fn edge_path(
     let marker_id = if is_cyclic { ARROW_CYCLIC_ID } else { ARROW_FORWARD_ID };
 
     format!(
-        r#"  <path id="edge-{}" d="{}" fill="none" stroke="{}" stroke-width="2.5" stroke-linecap="butt" stroke-linejoin="round"{} marker-end="url(#{})" />"#,
+        r#"  <path id="edge-{}" d="{}" fill="none" stroke="{}" stroke-width="3.5" stroke-linecap="butt" stroke-linejoin="round"{} marker-end="url(#{})" />"#,
         edge_id, d, stroke, dash, marker_id
     )
 }
