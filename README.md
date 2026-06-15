@@ -1,7 +1,11 @@
-# octovia
+<p align="center">
+  <img src="site/public/favicon.svg" alt="octovia" width="128" height="128">
+</p>
 
-**A pure-Rust, DOM-free state-diagram rendering engine.**
-Text in. Transit-map SVG out. No Node, no headless Chrome, no OS fonts.
+<h1 align="center">octovia</h1>
+
+<p align="center"><strong>A pure-Rust, DOM-free state-diagram rendering engine.</strong><br>
+Text in. Transit-map SVG out. No Node, no headless Chrome, no OS fonts.</p>
 
 ```
 title: octovia
@@ -47,7 +51,7 @@ The output is opinionated: octilinear routes on a 10 px sub-grid, dashed cycles,
 cargo add octovia
 
 # Or build the CLI from source
-git clone https://github.com/jeffgraham/octovia
+git clone https://github.com/jamesjoegraham/octovia
 cd octovia/rust
 cargo install --path .
 ```
