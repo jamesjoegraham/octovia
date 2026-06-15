@@ -3,6 +3,7 @@
   import CopyIcon from './icons/CopyIcon.svelte';
   import CheckIcon from './icons/CheckIcon.svelte';
   import CloseIcon from './icons/CloseIcon.svelte';
+  import GithubIcon from './icons/GithubIcon.svelte';
 
   type RenderFn = (d: string, w?: number | null, h?: number | null) => string;
 
@@ -199,17 +200,28 @@
       <MiniPlayground {ready} {renderSvg} {onOpenPlayground} />
     </div>
 
-    <div class="flex items-center justify-between mt-4">
+    <div class="flex items-center justify-between mt-4 gap-2">
       <p class="text-xs text-base-content/50 max-w-md">
         Diagrams re-render locally via WebAssembly on every keystroke. 
       </p>
-      <button
-        type="button"
-        onclick={onOpenPlayground}
-        class="btn btn-sm btn-neutral"
-      >
-        Open full playground →
-      </button>
+      <div class="flex items-center gap-2">
+        <a
+          href="https://github.com/jamesjoegraham/octovia"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="btn btn-sm btn-ghost gap-2"
+        >
+          <GithubIcon size={16} />
+          GitHub
+        </a>
+        <button
+          type="button"
+          onclick={onOpenPlayground}
+          class="btn btn-sm btn-neutral"
+        >
+          Open full playground →
+        </button>
+      </div>
     </div>
   </div>
 </div>

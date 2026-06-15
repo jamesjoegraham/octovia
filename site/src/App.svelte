@@ -56,7 +56,7 @@
   class:h-screen={page === 'playground'}
   class:min-h-screen={page !== 'playground'}
 >
-  <Navbar bind:page {ready} />
+  <Navbar bind:page />
 
   {#if page === 'about'}
     <AboutPage />
