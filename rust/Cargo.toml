@@ -30,3 +30,7 @@ clap = { version = "4", features = ["derive"] }
 
 # WASM support
 wasm-bindgen = "0.2"
+
+# Raster image export (PNG/JPEG)
+resvg = "0.47.0"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
