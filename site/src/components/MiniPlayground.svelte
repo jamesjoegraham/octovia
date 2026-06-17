@@ -3,17 +3,19 @@
   import { EXAMPLES, type ExampleName } from '../lib/examples';
   import { THEMES, THEME_LABELS } from '../lib/themes';
   import { currentTheme, withTheme } from '../lib/dsl';
-
-  type RenderFn = (d: string, w?: number | null, h?: number | null) => string;
-
+  
   let {
     ready,
-    renderSvg,
-    onOpenPlayground,
+    render,
+    dsl = $bindable(),
+    svg,
+    renderTimeStr,
   }: {
     ready: boolean;
-    renderSvg: RenderFn | null;
-    onOpenPlayground: () => void;
+    render: () => void;
+    dsl: string;
+    svg: string;
+    renderTimeStr: string | null;
   } = $props();
 
   // Three curated examples for the homepage taster.
@@ -23,11 +25,7 @@
   const DEBOUNCE_MS = 2000;
 
   let selected = $state<ExampleName>('Pizza Order');
-  let dsl = $state<string>(EXAMPLES['Pizza Order']);
-  let svg = $state('');
   let err = $state('');
-  let lastMs = $state<number | null>(null);
-  let pending = $state(false);
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -41,41 +39,17 @@
     }
   }
 
-  function doRender() {
-    clearDebounce();
-    pending = false;
-    if (!renderSvg) return;
-    try {
-      const t0 =
-        typeof performance !== 'undefined' && typeof performance.now === 'function'
-          ? performance.now()
-          : Date.now();
-      const out = renderSvg(dsl, null, null);
-      const t1 =
-        typeof performance !== 'undefined' && typeof performance.now === 'function'
-          ? performance.now()
-          : Date.now();
-      svg = out;
-      lastMs = t1 - t0;
-      err = '';
-    } catch (e: any) {
-      err = `Render error: ${e?.message ?? e}`;
-      svg = '';
-      lastMs = null;
-    }
-  }
-
   function scheduleRender() {
-    if (!ready || !renderSvg) return;
-    pending = true;
+    if (!ready || !render) return;
     clearDebounce();
-    debounceTimer = setTimeout(doRender, DEBOUNCE_MS);
+    debounceTimer = setTimeout(render, DEBOUNCE_MS);
   }
 
   // Initial render once WASM is ready.
   $effect(() => {
-    if (ready && renderSvg && !svg && !err) {
-      doRender();
+    if (ready && !svg && !err) {
+      dsl = EXAMPLES[selected];
+      render();
     }
   });
 
@@ -88,27 +62,14 @@
     let next: string = EXAMPLES[name];
     if (chosenTheme) next = withTheme(next, chosenTheme);
     dsl = next;
-    doRender();
+    render();
   }
 
   function setTheme(id: string) {
     dsl = withTheme(dsl, id);
-    doRender();
+    render();
   }
 
-  function formatLatency(ms: number): string {
-    // Some browsers (notably Firefox with default timer-precision clamping)
-    // round `performance.now()` to the nearest 1 ms, so a fast render can
-    // measure as exactly 0. Fall back to a "< 1 ms" display rather than "0 ms".
-    if (ms <= 0) return '< 1 ms';
-    if (ms < 1) {
-      const us = ms * 1000;
-      if (us < 10) return `${us.toFixed(1)} µs`;
-      return `${Math.round(us)} µs`;
-    }
-    if (ms < 10) return `${ms.toFixed(1)} ms`;
-    return `${Math.round(ms)} ms`;
-  }
 </script>
 
 <div class="rounded-box border border-base-300 bg-base-100 overflow-hidden shadow-sm">
@@ -130,7 +91,7 @@
       <select
         class="select select-xs select-bordered max-w-[110px]"
         value={theme}
-        onchange={(e) => { dsl = withTheme(dsl, e.currentTarget.value); doRender(); }}
+        onchange={(e) => { dsl = withTheme(dsl, e.currentTarget.value); render(); }}
       >
         {#each THEMES as t (t)}
           <option value={t}>{THEME_LABELS[t]}</option>
@@ -170,10 +131,10 @@
         class="pointer-events-none absolute bottom-1.5 right-2 text-[10px] font-mono tabular-nums"
         style="color: {lightBackground ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.45)'}"
       >
-        {#if pending}
+        {#if renderTimeStr === null}
           waiting…
-        {:else if lastMs !== null}
-          {formatLatency(lastMs)}
+        {:else}
+          {renderTimeStr}
         {/if}
       </div>
     </div>

@@ -22,7 +22,7 @@
     render: () => void;
   } = $props();
 
-  let selected = $state<Selection>('Simple Chain');
+  let selected = $state<Selection>('Pizza Order');
   const theme = $derived(currentTheme(dsl));
 
   const exampleNames = Object.keys(EXAMPLES) as ExampleName[];

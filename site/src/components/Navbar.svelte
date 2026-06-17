@@ -17,16 +17,16 @@
   }
 </script>
 
-<div class="navbar bg-base-100 border-b border-base-300 min-h-12 px-3 gap-2">
+<div class="navbar bg-base-100 border-b border-base-300 min-h-12 px-3 gap-8">
   <button
-    class="btn btn-lg gap-4 flex items-center bg-transparent border-0 shadow-none hover:bg-transparent hover:border-0 hover:shadow-none focus:bg-transparent focus:outline-none focus-visible:outline-none active:bg-transparent"
+    class="btn btn-lg p-0 gap-2 flex items-center bg-transparent border-0 shadow-none hover:bg-transparent hover:border-0 hover:shadow-none focus:bg-transparent focus:outline-none focus-visible:outline-none active:bg-transparent"
     onclick={() => go('home')}
   >
-    <img src="./favicon.svg" alt="octovia" class="w-12 h-12" />
-    <span class="font-semibold tracking-tight">Octovia</span>
+    <img src="./favicon.svg" alt="octovia" class="w-10 h-10" />
+    <span class="font-semibold tracking-tight text-xl">Octovia</span>
   </button>
 
-  <div class="join gap-0 ml-3 hidden sm:inline-flex">
+  <div class="join gap-0 hidden sm:inline-flex">
     <button
       class="btn btn-md join-item {page === 'home' ? 'btn-active' : 'btn-ghost'}"
       onclick={() => go('home')}
@@ -54,6 +54,8 @@
     </a>
 
     <div class="sm:hidden relative">
+
+      
       <button
         class="btn btn-ghost btn-square"
         aria-label="Open menu"

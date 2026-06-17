@@ -7,17 +7,18 @@
   let {
     svg,
     err,
+    renderTimeStr,
     lightBackground,
   }: {
     svg: string;
     err: string;
+    renderTimeStr: string | null;
     lightBackground: boolean;
   } = $props();
 
   let showRawSvg = $state(false);
   let copyState = $state<'idle' | 'copied' | 'downloaded' | 'error'>('idle');
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
-
   const canCopyToClipboard =
     typeof navigator !== 'undefined' &&
     !!navigator.clipboard &&
@@ -28,7 +29,7 @@
   function flashCopyState(next: 'copied' | 'downloaded' | 'error') {
     copyState = next;
     if (copyTimer) clearTimeout(copyTimer);
-    copyTimer = setTimeout(() => {s
+    copyTimer = setTimeout(() => {
       copyState = 'idle';
       copyTimer = null;
     }, 1500);
@@ -117,6 +118,21 @@
       }
     }
   }
+
+  function formatLatency(ms: number): string {
+    // Some browsers (notably Firefox with default timer-precision clamping)
+    // round `performance.now()` to the nearest 1 ms, so a fast render can
+    // measure as exactly 0. Fall back to a "< 1 ms" display rather than "0 ms".
+    if (ms <= 0) return '< 1 ms';
+    if (ms < 1) {
+      const us = ms * 1000;
+      if (us < 10) return `${us.toFixed(1)} µs`;
+      return `${Math.round(us)} µs`;
+    }
+    if (ms < 10) return `${ms.toFixed(1)} ms`;
+    return `${Math.round(ms)} ms`;
+  }
+
 </script>
 
 <section class="flex-1 flex flex-col min-w-0 bg-base-200 overflow-hidden">
@@ -128,7 +144,10 @@
       class:bg-base-300={!lightBackground}
       class:bg-white={lightBackground}
     >
-      <div class="svg-wrap max-w-full max-h-full">{@html svg}</div>
+      <div class="svg-wrap max-w-full max-h-full">
+        {@html svg}
+      </div>
+
       <button
         class="btn btn-sm btn-square absolute top-3 right-3 shadow-md"
         class:btn-success={copyState === 'copied' || copyState === 'downloaded'}
@@ -158,6 +177,8 @@
         {/if}
       </button>
     </div>
+
+    
   {:else}
     <div class="flex-1 flex items-center justify-center text-base-content/40 text-sm gap-2">
       Enter DSL above, then
@@ -178,6 +199,19 @@
       {/if}
     </div>
   {/if}
+
+  <!-- Latency / pending indicator (bottom-right) -->
+  <div
+    class="pointer-events-none absolute bottom-1.5 right-2 text-[10px] font-mono tabular-nums"
+    style="color: {lightBackground ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.45)'}"
+  >
+    {#if !svg}
+      waiting…
+    {:else if renderTimeStr !== null}
+      {renderTimeStr}
+    {/if}
+  </div>
+
 </section>
 
 <style>

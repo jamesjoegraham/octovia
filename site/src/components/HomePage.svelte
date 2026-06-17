@@ -11,11 +11,17 @@
 
   let {
     ready,
-    renderSvg,
+    render,
+    dsl = $bindable(),
+    svg,
+    renderTimeStr,
     onOpenPlayground,
   }: {
     ready: boolean;
-    renderSvg: RenderFn | null;
+    render: () => void;
+    dsl: string;
+    svg: string;
+    renderTimeStr: string | null;
     onOpenPlayground: () => void;
   } = $props();
 
@@ -199,7 +205,7 @@
     </section>
 
     <div class="shadow-sm border border-base-300 rounded-xl overflow-hidden mb-4">
-      <MiniPlayground {ready} {renderSvg} {onOpenPlayground} />
+      <MiniPlayground {ready} {render} bind:dsl={dsl} {svg} {renderTimeStr} />
     </div>
 
     <div class="flex items-center justify-between mt-4 gap-2">
