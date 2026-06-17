@@ -32,7 +32,7 @@ use crate::ast::{Diagram, Point, Viewport};
 /// Maximum number of topological layers per macro-row. When the diagram
 /// exceeds this many layers, the layout folds into serpentine macro-rows.
 /// Default 4 layers fits comfortably on a mobile screen (360–480 dp).
-pub const MAX_COLUMNS: i32 = 4;
+pub const MAX_COLUMNS: i32 = 3;
 
 /// Horizontal gutter (px) between adjacent layer columns. This is the
 /// dedicated routing channel A* uses for forward and back-edge passes.
