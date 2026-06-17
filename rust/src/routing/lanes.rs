@@ -15,12 +15,13 @@ use crate::ast::{Diagram, Point};
 const LANE_SPACING: i32 = 10;
 
 /// After all edges are routed, assign lane offsets to parallel forward
-/// edges that share the same straight segment **and** spread cyclic
-/// back-edges that share the same horizontal "bottom channel" so each
-/// one rides its own row instead of stacking onto the previous edge's
-/// line.
+/// edges that share the same straight segment, spread cyclic back-edges
+/// that share the same horizontal "bottom channel", and also fan out
+/// coincident horizontal segments that span macro-row gutters
+/// (boustrophedon wrap-around edges).
 pub(crate) fn assign_parallel_lanes(diagram: &mut Diagram) {
     assign_forward_lanes(diagram);
+    assign_gutter_lanes(diagram);
     assign_back_edge_lanes(diagram);
 }
 
@@ -222,6 +223,97 @@ fn assign_forward_lanes(diagram: &mut Diagram) {
 
             let edge_mut = &mut diagram.edges[edge_idx];
             edge_mut.route = new_route;
+        }
+    }
+}
+
+/// Spread coincident horizontal segments that run through macro-row
+/// gutters (boustrophedon wrap-around edges). When a forward edge wraps
+/// from the end of one macro-row to the start of the next, A* routes it
+/// South through a vertical channel, then horizontally through the
+/// MACRO_ROW_GUTTER, then North to the target. Multiple such edges can
+/// share the same horizontal gutter line; this pass fans them out into
+/// distinct lanes, offset vertically, with 45° connectors at each end.
+///
+/// The logic mirrors `assign_back_edge_lanes` but applies to *all* edges
+/// (not just cyclic) whose route contains a long horizontal run. This
+/// specifically catches forward boustrophedon wrap-around edges, where
+/// the horizontal run sits in the MACRO_ROW_GUTTER gap between macro-rows.
+fn assign_gutter_lanes(diagram: &mut Diagram) {
+    struct Run {
+        edge_idx: usize,
+        start: usize,
+        end: usize,
+        y: i32,
+        x_lo: i32,
+        x_hi: i32,
+    }
+
+    let mut runs: Vec<Run> = Vec::new();
+    for (i, edge) in diagram.edges.iter().enumerate() {
+        // Skip edges that are entirely straight — they're already handled
+        // by assign_forward_lanes (vanilla forward edges) or
+        // assign_back_edge_lanes (cyclic back-edges).
+        if edge.route.len() < 3 {
+            continue;
+        }
+        let xs: Vec<i32> = edge.route.iter().map(|p| p.x).collect();
+        let ys: Vec<i32> = edge.route.iter().map(|p| p.y).collect();
+        let all_same_x = xs.iter().all(|&x| x == xs[0]);
+        let all_same_y = ys.iter().all(|&y| y == ys[0]);
+        if all_same_x || all_same_y {
+            // Fully straight — handled by assign_forward_lanes.
+            continue;
+        }
+
+        let Some((start, end)) = longest_horizontal_run(&edge.route) else {
+            continue;
+        };
+        // Don't touch runs at the very tail or head of the route —
+        // there'd be no connector to patch.
+        if start == 0 || end + 1 >= edge.route.len() {
+            continue;
+        }
+        let y = edge.route[start].y;
+        let x_lo = edge.route[start..=end].iter().map(|p| p.x).min().unwrap();
+        let x_hi = edge.route[start..=end].iter().map(|p| p.x).max().unwrap();
+        runs.push(Run { edge_idx: i, start, end, y, x_lo, x_hi });
+    }
+
+    // Group runs by shared y where the x-ranges overlap *or touch*.
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    'outer: for ri in 0..runs.len() {
+        for group in groups.iter_mut() {
+            if runs[group[0]].y != runs[ri].y {
+                continue;
+            }
+            let touches = group.iter().any(|&gi| {
+                runs[ri].x_lo <= runs[gi].x_hi && runs[gi].x_lo <= runs[ri].x_hi
+            });
+            if touches {
+                group.push(ri);
+                continue 'outer;
+            }
+        }
+        groups.push(vec![ri]);
+    }
+
+    for group in &groups {
+        if group.len() < 2 {
+            continue;
+        }
+        // Stable order: by input edge index.
+        let mut sorted: Vec<usize> = group.clone();
+        sorted.sort_by_key(|&gi| runs[gi].edge_idx);
+
+        for (lane_k, &gi) in sorted.iter().enumerate() {
+            let dy = (lane_k as i32) * LANE_SPACING;
+            if dy == 0 {
+                continue;
+            }
+            let (start, end) = (runs[gi].start, runs[gi].end);
+            let route = &mut diagram.edges[runs[gi].edge_idx].route;
+            shift_horizontal_run_south(route, start, end, dy);
         }
     }
 }

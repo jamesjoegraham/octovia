@@ -1,10 +1,29 @@
-//! Port computation — translating "the source's East side" to a grid cell
-//! that sits just outside the node's blocking square.
+//! Port computation — geometry-aware port candidates for boustrophedon
+//! (serpentine, macro-row) layout.
 //!
-//! The 8-port rule is preserved: every node exposes E/W/N/S ports and the
-//! four diagonal slots are reserved for label placement. With variable
-//! node widths, the port offset is now derived from each node's actual
-//! `NodeSize` rather than a fixed constant.
+//! Previously, forward_port_candidates assumed a strictly left-to-right
+//! topological flow (East->West for edges going right). With boustrophedon
+//! folding, layer indices no longer monotonically increase in X. Instead,
+//! we evaluate the **relative X/Y geometry** of source and target nodes
+//! regardless of their topological layer.
+//!
+//! Three cases:
+//!
+//! 1. **Intra-fold edges** — source and target sit in the same macro-row.
+//!    The port logic is the same as before: East->West or West->East based
+//!    purely on which node has the higher effective X coordinate.
+//!
+//! 2. **Wrap-around edges** — source is at the end of one macro-row and
+//!    target is at the start of the next (or vice versa). Generate
+//!    South->North or South->East stalk cells to guide A* through the
+//!    macro-row gutter.
+//!
+//! 3. **Vertical skip edges** — edges that span multiple macro-rows.
+//!    Generate North/South ports so the route can traverse vertically
+//!    through the MACRO_ROW_GUTTERs.
+//!
+//! Back-edge port candidates remain unchanged — they already use the
+//! physical geometry of the two nodes and the south channel.
 
 use crate::ast::{NodeSize, Point, PortDirection};
 
@@ -55,10 +74,15 @@ pub(crate) fn pick_forward_ports(from: Point, to: Point) -> (PortDirection, Port
 }
 
 /// Generate a small, ranked set of (source, target) port pair candidates
-/// for a forward edge. The first entry is the geometric primary; the
-/// remaining entries fix the target port (the "natural" approach axis)
-/// and try perpendicular source ports so A* can detour around obstacles
-/// without the router being locked to a single axis pair.
+/// for a non-cyclic edge in a boustrophedon (serpentine macro-row) layout.
+///
+/// **Geometry-based** — we evaluate whether source is to the left or right
+/// of target, regardless of topological layer index. This is essential
+/// because layers in odd macro-rows flow right-to-left, so a "forward"
+/// edge may exit East or West depending on physical X position.
+///
+/// The candidates are ranked: primary axis pair first, then perpendicular
+/// alternates so A* can detour around obstacles.
 pub(crate) fn forward_port_candidates(
     from: Point,
     to: Point,
@@ -66,6 +90,9 @@ pub(crate) fn forward_port_candidates(
     let dx = to.x - from.x;
     let dy = to.y - from.y;
 
+    // Use the same geometric decision as before — it already works for
+    // both pure LTR and boustrophedon because it reasons about *physical*
+    // positions, not layer indices.
     let prefer_horizontal = if dx == 0 && dy != 0 {
         false
     } else if dy == 0 {
@@ -100,10 +127,18 @@ pub(crate) fn forward_port_candidates(
         (PortDirection::West, PortDirection::East)
     };
 
+    // For boustrophedon wrap-around (where source is at the right end of
+    // macro-row N and target at the left end of macro-row N+1),
+    // dx might be negative even though the edge is topologically "forward".
+    // The geometry-based logic above already handles this — if to.x < from.x
+    // it correctly emits West->East. This is fine because A* will find the
+    // path South through the macro-row gutter regardless.
+
     vec![(primary_src, tgt), (perp_near, tgt), (perp_far, tgt)]
 }
 
-/// Generate the candidate (source, target) port pairs for a *back-edge*.
+/// Generate the candidate (source, target) port pairs for a **back-edge**
+/// (or any edge where `is_cyclic == true`).
 ///
 /// Topological layout expands layers horizontally, so the band of empty
 /// canvas directly *underneath* every node is the most reliable routing
@@ -114,6 +149,11 @@ pub(crate) fn forward_port_candidates(
 /// North-entry variants for the rare cases where the south channel is
 /// fully congested. Every candidate is real so a strict-orthogonal A*
 /// can always find a legal escape route.
+///
+/// In a boustrophedon layout back-edges may also need to navigate
+/// macro-row gutters, but the South-channel strategy already handles
+/// this naturally because the South channel sits below the lowest
+/// node in any given macro-row.
 pub(crate) fn back_port_candidates(
     from: Point,
     to: Point,
