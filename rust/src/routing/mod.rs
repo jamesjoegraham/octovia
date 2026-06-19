@@ -330,39 +330,39 @@ mod tests {
         assert!(d.edges[0].label_anchor.is_some());
     }
 
-    // ---- 8-port forward-edge selection -------------------------------------
+    // ---- TTB forward-edge selection ---------------------------------------
 
     #[test]
-    fn test_pick_forward_ports_same_row_east() {
-        let (s, t) = pick_forward_ports(Point::new(100, 100), Point::new(300, 100));
+    fn test_pick_forward_ports_same_column_below() {
+        let (s, t) = pick_forward_ports(Point::new(200, 100), Point::new(200, 300));
+        assert_eq!(s, PortDirection::South);
+        assert_eq!(t, PortDirection::North);
+    }
+
+    #[test]
+    fn test_pick_forward_ports_vertical_dominant() {
+        let (s, t) = pick_forward_ports(Point::new(100, 100), Point::new(150, 400));
+        assert_eq!(s, PortDirection::South);
+        assert_eq!(t, PortDirection::North);
+    }
+
+    #[test]
+    fn test_pick_forward_ports_same_y_uses_east_west() {
+        let (s, t) = pick_forward_ports(Point::new(100, 200), Point::new(300, 200));
         assert_eq!(s, PortDirection::East);
         assert_eq!(t, PortDirection::West);
     }
 
     #[test]
-    fn test_pick_forward_ports_same_row_west() {
+    fn test_pick_forward_ports_same_y_westward() {
         let (s, t) = pick_forward_ports(Point::new(500, 250), Point::new(300, 250));
         assert_eq!(s, PortDirection::West);
         assert_eq!(t, PortDirection::East);
     }
 
     #[test]
-    fn test_pick_forward_ports_same_column_below() {
-        let (s, t) = pick_forward_ports(Point::new(500, 100), Point::new(500, 250));
-        assert_eq!(s, PortDirection::South);
-        assert_eq!(t, PortDirection::North);
-    }
-
-    #[test]
-    fn test_pick_forward_ports_diagonal_dominant_horizontal() {
-        let (s, t) = pick_forward_ports(Point::new(100, 100), Point::new(500, 200));
-        assert_eq!(s, PortDirection::East);
-        assert_eq!(t, PortDirection::West);
-    }
-
-    #[test]
-    fn test_pick_forward_ports_diagonal_dominant_vertical() {
-        let (s, t) = pick_forward_ports(Point::new(100, 100), Point::new(150, 400));
+    fn test_pick_forward_ports_downward_dominant() {
+        let (s, t) = pick_forward_ports(Point::new(100, 100), Point::new(200, 500));
         assert_eq!(s, PortDirection::South);
         assert_eq!(t, PortDirection::North);
     }

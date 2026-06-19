@@ -1,25 +1,20 @@
-//! Layered Topological Layout (lightweight Sugiyama) with boustrophedon
-//! (serpentine) macro-row folding.
+//! Top-to-Bottom Layered Topological Layout (Sugiyama-style).
 //!
 //! 1. Classify back-edges via DFS so the remaining graph is a DAG.
 //! 2. Assign each node a layer `L(v)` via longest-path topological sort
-//!    (Kahn's algorithm — **unchanged**).
-//! 3. Within each layer, stack nodes vertically in input order.
-//! 4. Fold the layers into macro-rows of at most `MAX_COLUMNS` columns
-//!    each. Even macro-rows flow LTR, odd macro-rows flow RTL (serpentine).
-//!    This produces a compact width ideal for mobile screens while
-//!    preserving topological ordering within each fold.
-//! 5. Map macro-rows → Y positions and effective-columns → X positions
-//!    on a pixel grid, with explicit gutters between adjacent layers
-//!    (LAYER_GUTTER), rows (ROW_GUTTER), and macro-rows
-//!    (MACRO_ROW_GUTTER). The gutters are the routing channels A* uses
-//!    for forward, back, and wrap-around edges.
+//!    (Kahn's algorithm — **unchanged**, per architecture constraint).
+//! 3. Within each layer, place nodes side-by-side horizontally in input
+//!    order. Layers are stacked vertically top-to-bottom.
+//! 4. Map layers → Y positions and intra-layer nodes → X positions on
+//!    a pixel grid, with vertical gutters (LAYER_GUTTER) between layers
+//!    and horizontal gutters (NODE_GUTTER) between nodes in the same
+//!    layer. Each layer is horizontally centred around X = 0 so the
+//!    diagram looks balanced.
 //!
-//! Every forward edge `e = (u, v)` still satisfies `L(u) < L(v)`, but
-//! the physical X-coordinate may wrap: a node in layer 5 folded into
-//! macro-row 1 appears to the *left* of a node in layer 4 in macro-row 0.
-//! The A* router already reasons about geometry, not layer indices, so
-//! this is transparent to the routing phase.
+//! Every forward edge `e = (u, v)` satisfies `L(u) < L(v)`.
+//! The Y-coordinate increases downward: L(u) → lower Y value (higher on
+//! screen), L(v) → higher Y value (lower on screen). This aligns with
+//! native vertical scrolling on mobile and desktop.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
@@ -29,21 +24,12 @@ use crate::ast::{Diagram, Point, Viewport};
 // Constants
 // ---------------------------------------------------------------------------
 
-/// Maximum number of topological layers per macro-row. When the diagram
-/// exceeds this many layers, the layout folds into serpentine macro-rows.
-/// Default 4 layers fits comfortably on a mobile screen (360–480 dp).
-pub const MAX_COLUMNS: i32 = 3;
-
-/// Horizontal gutter (px) between adjacent layer columns. This is the
-/// dedicated routing channel A* uses for forward and back-edge passes.
+/// Vertical gutter (px) between adjacent layers. This is the dedicated
+/// routing channel A* uses for forward and back-edge passes.
 pub const LAYER_GUTTER: i32 = 90;
 
-/// Vertical gutter (px) between adjacent rows within a macro-row.
-pub const ROW_GUTTER: i32 = 70;
-
-/// Vertical gutter (px) between adjacent macro-rows. Larger than
-/// ROW_GUTTER to give wrap-around edge routing room to manoeuvre.
-pub const MACRO_ROW_GUTTER: i32 = 90;
+/// Horizontal gutter (px) between adjacent nodes within the same layer.
+pub const NODE_GUTTER: i32 = 70;
 
 /// Outer margin around the diagram bounding box.
 pub const MARGIN: i32 = 50;
@@ -186,38 +172,14 @@ fn compute_layers(diagram: &Diagram, back: &HashSet<usize>) -> HashMap<String, i
 }
 
 // ---------------------------------------------------------------------------
-// Macro-row helpers (boustrophedon folding)
-// ---------------------------------------------------------------------------
-
-/// Compute the effective column within a macro-row for a given layer.
-///
-/// Even macro-rows flow left-to-right: effective_col = layer % k.
-/// Odd macro-rows flow right-to-left: effective_col = k - 1 - (layer % k).
-fn effective_column(layer: i32, k: i32) -> i32 {
-    let within_fold = layer % k;
-    let macro_row = layer / k;
-    if macro_row % 2 == 0 {
-        within_fold
-    } else {
-        k - 1 - within_fold
-    }
-}
-
-/// Ceil a value to the nearest 10 px grid cell boundary.
-pub(crate) fn ceil_to_grid(n: i32) -> i32 {
-    ((n + 9) / 10) * 10
-}
-
-// ---------------------------------------------------------------------------
-// Coordinate placement (boustrophedon)
+// TTB coordinate placement
 // ---------------------------------------------------------------------------
 
 /// Final entry point: classify cycles, assign layers, place nodes on the
-/// pixel grid using serpentine macro-row folding. Mutates
-/// `diagram.nodes[*].position` and `diagram.edges[*].is_cyclic`.
+/// pixel grid using Top-to-Bottom layout.
 ///
 /// Topological phase 2b (Kahn's longest-path sort) remains unchanged.
-/// Only the physical coordinate assignment in this function uses macro-rows.
+/// Only the physical coordinate assignment in this function uses TTB.
 pub fn layout_backbone(diagram: &mut Diagram) {
     if diagram.nodes.is_empty() {
         return;
@@ -233,133 +195,78 @@ pub fn layout_backbone(diagram: &mut Diagram) {
         groups.entry(l).or_default().push(i);
     }
 
-    let k = MAX_COLUMNS;
+    // ---- Layer height / Y placement ----
+    // For each layer, compute its maximum node height. Layer Y positions
+    // are accumulated vertically with LAYER_GUTTER between them.
+    // Y is the centre of each layer's row of nodes.
 
-    // Per-layer column width = max node width in that layer.
-    let mut layer_widths: BTreeMap<i32, i32> = BTreeMap::new();
+    let mut layer_heights: BTreeMap<i32, i32> = BTreeMap::new(); // layer → max node height
+    let mut layer_widths: BTreeMap<i32, i32> = BTreeMap::new();  // layer → total width of all nodes + gutters
+    let mut layer_node_widths: BTreeMap<i32, Vec<i32>> = BTreeMap::new(); // layer → individual node widths
+
     for (&l, indices) in &groups {
-        let mut max_w = 2 * NODE_RADIUS;
+        let mut max_h = 2 * NODE_RADIUS;
+        let mut widths: Vec<i32> = Vec::new();
         for &i in indices {
             let size = diagram.nodes[i].node_size.unwrap_or(crate::ast::NodeSize {
                 width: 60,
                 height: 60,
             });
-            if size.width > max_w {
-                max_w = size.width;
+            if size.height > max_h {
+                max_h = size.height;
             }
+            widths.push(size.width);
         }
-        layer_widths.insert(l, max_w);
+        layer_heights.insert(l, max_h);
+
+        // Total width = sum of all node widths + (n-1) * NODE_GUTTER
+        let n_nodes = widths.len() as i32;
+        let total_w: i32 = widths.iter().sum::<i32>()
+            + ((n_nodes - 1).max(0)) * NODE_GUTTER;
+        layer_widths.insert(l, total_w);
+        layer_node_widths.insert(l, widths);
     }
 
-    // Compute per-effective-column (within each macro-row) the max width.
-    // Also track per-row heights per macro-row so within each macro-row
-    // rows top-align.
-    let mut macro_row_count: i32 = 0;
-    let mut macro_row_max_heights: Vec<Vec<i32>> = Vec::new(); // [macro_row][row]
-    let mut macro_row_max_widths: Vec<Vec<i32>> = Vec::new(); // [macro_row][eff_col]
+    // ---- Determine the global diagram width ----
+    // Find the widest layer to set the overall diagram width.
+    // Layers are centred within this width so the tree looks balanced.
+    let global_width: i32 = layer_widths.values().copied().max().unwrap_or(2 * NODE_RADIUS);
 
+    // ---- Compute Y positions for each layer ----
+    // The layers stack vertically. Layer 0 is at the top.
+    // Y-coordinate for a layer = MARGIN + accumulated heights of all previous layers
+    //                           + number_of_previous_gutters * LAYER_GUTTER
+    // The Y value stored is the centre row of that layer's nodes.
+    let mut layer_y_centres: BTreeMap<i32, i32> = BTreeMap::new();
+    let mut y_cursor = MARGIN;
+    for (&l, _) in &groups {
+        let h = layer_heights[&l];
+        y_cursor += h / 2;
+        layer_y_centres.insert(l, y_cursor);
+        y_cursor += (h - h / 2) + LAYER_GUTTER;
+    }
+
+    // ---- Compute X positions for each node within its layer ----
+    // Nodes are placed side-by-side within the layer, centred on the
+    // global centre axis. Each layer's total width determines its
+    // left padding so the widest layer spans from MARGIN to
+    // MARGIN + global_width.
     for (&l, indices) in &groups {
-        let mr = l / k;
-        while macro_row_max_heights.len() <= mr as usize {
-            macro_row_max_heights.push(Vec::new());
-            macro_row_max_widths.push(Vec::new());
-        }
-        let ecol = effective_column(l, k) as usize;
+        let widths = &layer_node_widths[&l];
+        let total_w = layer_widths[&l];
+        let left_pad = MARGIN + (global_width - total_w) / 2;
 
-        // Expand widths array for this macro-row if needed.
-        let w_row = &mut macro_row_max_widths[mr as usize];
-        while w_row.len() <= ecol {
-            w_row.push(0);
-        }
-        if layer_widths[&l] > w_row[ecol] {
-            w_row[ecol] = layer_widths[&l];
-        }
-
-        // Expand heights array for each row within this macro-row.
-        let h_row = &mut macro_row_max_heights[mr as usize];
+        let mut x_cursor = left_pad;
         for (row, &i) in indices.iter().enumerate() {
-            while h_row.len() <= row {
-                h_row.push(0);
-            }
-            let size = diagram.nodes[i].node_size.unwrap_or(crate::ast::NodeSize {
-                width: 60,
-                height: 60,
-            });
-            if size.height > h_row[row] {
-                h_row[row] = size.height;
-            }
-        }
+            let w = widths[row];
+            x_cursor += w / 2;
 
-        macro_row_count = macro_row_count.max(mr + 1);
-    }
-
-    // ---- Boustrophedon X-position computation ----
-    // For each macro-row, lay out the effective columns on a cumulative
-    // cursor that resets at every macro-row (so odd rows appear to flow
-    // right-to-left but their absolute X positions increase monotonically).
-
-    // First compute per-macro-row column centres.
-    // macro_row_centres[mr][eff_col] = absolute x
-    let mut macro_row_centres: Vec<Vec<i32>> = Vec::new();
-
-    for mr in 0..macro_row_count {
-        let w_row = &macro_row_max_widths[mr as usize];
-        let n_cols = w_row.len().max(1);
-
-        // Build effective-col → absolute-x mapping for this macro-row.
-        // The cursor always moves left-to-right in absolute space; the
-        // serpentine direction is captured by which layer maps to which
-        // effective column.
-        let mut centres: Vec<i32> = Vec::with_capacity(n_cols);
-        let mut cursor = MARGIN;
-        for ec in 0..n_cols {
-            let w = w_row[ec].max(2 * NODE_RADIUS);
-            cursor += w / 2;
-            centres.push(cursor);
-            cursor += (w - w / 2) + LAYER_GUTTER;
-        }
-        macro_row_centres.push(centres);
-    }
-
-    // ---- Boustrophedon Y-position computation ----
-    // For each macro-row, compute the Y base (top of that macro-row's
-    // bounding box), then centre each row within the macro-row.
-    let mut macro_row_y_bases: Vec<i32> = Vec::with_capacity(macro_row_count as usize);
-    let mut yc = MARGIN;
-    for mr in 0..macro_row_count {
-        macro_row_y_bases.push(yc);
-        let h_row = &macro_row_max_heights[mr as usize];
-        let macro_row_height: i32 = h_row.iter().sum::<i32>()
-            + ((h_row.len() as i32).saturating_sub(1)) * ROW_GUTTER;
-        yc += macro_row_height + MACRO_ROW_GUTTER;
-    }
-
-    // ---- Apply positions ----
-    for (&l, indices) in &groups {
-        let mr = (l / k) as usize;
-        let ecol = effective_column(l, k) as usize;
-
-        let x = macro_row_centres[mr]
-            .get(ecol)
-            .copied()
-            .unwrap_or(MARGIN);
-        let y_base = macro_row_y_bases[mr];
-
-        // Compute per-row Y offsets within this macro-row.
-        let h_row = &macro_row_max_heights[mr];
-        let mut row_y_offsets: Vec<i32> = Vec::with_capacity(indices.len());
-        let mut row_y = y_base;
-        for (row, _) in indices.iter().enumerate() {
-            let h = h_row.get(row).copied().unwrap_or(2 * NODE_RADIUS);
-            row_y += h / 2;
-            row_y_offsets.push(row_y);
-            row_y += (h - h / 2) + ROW_GUTTER;
-        }
-
-        for (row, &i) in indices.iter().enumerate() {
-            let pos = Point::new(x, row_y_offsets[row]);
+            let y_centre = layer_y_centres[&l];
+            let pos = Point::new(x_cursor, y_centre);
             diagram.nodes[i].position = Some(pos);
             diagram.nodes[i].layer = Some(l as usize);
+
+            x_cursor += (w - w / 2) + NODE_GUTTER;
         }
     }
 
@@ -383,10 +290,10 @@ mod tests {
         let mut d = parse_dsl("A -> B\nB -> C\n").unwrap();
         measure_diagram(&mut d);
         layout_backbone(&mut d);
-        let xa = d.node("A").unwrap().position.unwrap().x;
-        let xb = d.node("B").unwrap().position.unwrap().x;
-        let xc = d.node("C").unwrap().position.unwrap().x;
-        assert!(xa < xb && xb < xc, "linear chain must flow left-to-right");
+        let ya = d.node("A").unwrap().position.unwrap().y;
+        let yb = d.node("B").unwrap().position.unwrap().y;
+        let yc = d.node("C").unwrap().position.unwrap().y;
+        assert!(ya < yb && yb < yc, "linear chain must flow top-to-bottom");
     }
 
     #[test]
@@ -402,17 +309,17 @@ mod tests {
     }
 
     #[test]
-    fn test_layered_branch_stacks_vertically() {
+    fn test_layered_branch_places_horizontally() {
         let mut d = parse_dsl("A -> B\nA -> C\n").unwrap();
         measure_diagram(&mut d);
         layout_backbone(&mut d);
         let pa = d.node("A").unwrap().position.unwrap();
         let pb = d.node("B").unwrap().position.unwrap();
         let pc = d.node("C").unwrap().position.unwrap();
-        // B and C are both successors of A — same layer, distinct rows.
-        assert_eq!(pb.x, pc.x);
-        assert_ne!(pb.y, pc.y);
-        assert!(pa.x < pb.x);
+        // B and C are both successors of A — same layer, distinct columns (side-by-side).
+        assert_eq!(pb.y, pc.y);
+        assert_ne!(pb.x, pc.x);
+        assert!(pa.y < pb.y);
     }
 
     #[test]
@@ -441,71 +348,41 @@ mod tests {
         // D -> A is the only back-edge.
         let cyclic_count = d.edges.iter().filter(|e| e.is_cyclic).count();
         assert_eq!(cyclic_count, 1);
-        // A < B,C < D in x order (all in macro-row 0 with MAX_COLUMNS=4).
-        let xa = d.node("A").unwrap().position.unwrap().x;
-        let xd = d.node("D").unwrap().position.unwrap().x;
-        assert!(xa < xd);
+        // A < B,C < D in y order (top to bottom).
+        let ya = d.node("A").unwrap().position.unwrap().y;
+        let yd = d.node("D").unwrap().position.unwrap().y;
+        assert!(ya < yd);
     }
 
-    // ---- Boustrophedon macro-row tests -----------------------------------
-
     #[test]
-    fn test_boustrophedon_single_macro_row_is_linear() {
-        // 3 layers ≤ MAX_COLUMNS (4) → single macro-row, straight LTR.
+    fn test_ttb_layer_path_y_increases() {
+        // A 4-layer chain must have Y positions increase strictly
+        // from top to bottom.
         let mut d = parse_dsl("A -> B\nB -> C\nC -> D\n").unwrap();
         measure_diagram(&mut d);
         layout_backbone(&mut d);
-        let xa = d.node("A").unwrap().position.unwrap().x;
-        let xb = d.node("B").unwrap().position.unwrap().x;
-        let xc = d.node("C").unwrap().position.unwrap().x;
-        let xd = d.node("D").unwrap().position.unwrap().x;
-        assert!(xa < xb && xb < xc && xc < xd, "single macro-row must be strictly left-to-right");
-    }
-
-    #[test]
-    fn test_boustrophedon_two_macro_rows_serpentine() {
-        // 6 layers → 2 macro-rows (4 + 2). Layer 4 (second fold) should
-        // have its effective col 0, placing it to the left of layer 3.
-        let mut d = parse_dsl(
-            "A -> B\n\
-             B -> C\n\
-             C -> D\n\
-             D -> E\n\
-             E -> F\n",
-        )
-        .unwrap();
-        measure_diagram(&mut d);
-        layout_backbone(&mut d);
-        let xd = d.node("D").unwrap().position.unwrap().x; // layer 3, macro-row 0
-        let xe = d.node("E").unwrap().position.unwrap().x; // layer 4, macro-row 1
-        // Layer 4 is the first layer of macro-row 1 (odd row → RTL).
-        // effective_col = 3 (rightmost in second fold) so it should be
-        // to the right of D's layer-3 position.
-        assert!(xe > xd || xe == xd,
-            "E (layer 4, odd macro-row, eff_col 3) should be at or right of D (layer 3, eff_col 3)");
-    }
-
-    #[test]
-    fn test_boustrophedon_macro_rows_have_distinct_y_bases() {
-        // 5 layers → 2 macro-rows. Nodes in macro-row 1 must be below
-        // nodes in macro-row 0.
-        let mut d = parse_dsl(
-            "A -> B\n\
-             B -> C\n\
-             C -> D\n\
-             D -> E\n",
-        )
-        .unwrap();
-        measure_diagram(&mut d);
-        layout_backbone(&mut d);
         let ya = d.node("A").unwrap().position.unwrap().y;
-        let ye = d.node("E").unwrap().position.unwrap().y;
-        assert!(ye > ya, "macro-row 1 must be below macro-row 0");
+        let yb = d.node("B").unwrap().position.unwrap().y;
+        let yc = d.node("C").unwrap().position.unwrap().y;
+        let yd = d.node("D").unwrap().position.unwrap().y;
+        assert!(ya < yb && yb < yc && yc < yd, "TTB chain must be strictly top-to-bottom");
     }
 
     #[test]
-    fn test_boustrophedon_layer_preserved() {
-        // Topological layers must be unchanged by boustrophedon folding.
+    fn test_ttb_same_layer_siblings_same_y() {
+        // A -> B and A -> C: B and C in same layer, same Y, different X.
+        let mut d = parse_dsl("A -> B\nA -> C\n").unwrap();
+        measure_diagram(&mut d);
+        layout_backbone(&mut d);
+        let pb = d.node("B").unwrap().position.unwrap();
+        let pc = d.node("C").unwrap().position.unwrap();
+        assert_eq!(pb.y, pc.y, "siblings in same layer must share Y");
+        assert_ne!(pb.x, pc.x, "siblings in same layer must have distinct X");
+    }
+
+    #[test]
+    fn test_ttb_layer_preserved() {
+        // Topological layers must be unchanged by TTB layout.
         let mut d = parse_dsl("A -> B\nB -> C\nC -> D\nD -> E\nE -> F\n").unwrap();
         measure_diagram(&mut d);
         layout_backbone(&mut d);

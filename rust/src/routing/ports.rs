@@ -1,29 +1,29 @@
-//! Port computation — geometry-aware port candidates for boustrophedon
-//! (serpentine, macro-row) layout.
+//! Port computation — geometry-aware port candidates for Top-to-Bottom
+//! vertical layout.
 //!
-//! Previously, forward_port_candidates assumed a strictly left-to-right
-//! topological flow (East->West for edges going right). With boustrophedon
-//! folding, layer indices no longer monotonically increase in X. Instead,
-//! we evaluate the **relative X/Y geometry** of source and target nodes
-//! regardless of their topological layer.
+//! In TTB layout, time flows downward. Layer indices increase from top
+//! to bottom. Forward edges exit the South face of the source node and
+//! enter the North face of the target node. Back-edges (feedback loops)
+//! use East→East or West→West to route up the vertical flanks of the
+//! diagram. Same-layer edges (two nodes on the same Y level but
+//! different X positions) use East↔West.
 //!
 //! Three cases:
 //!
-//! 1. **Intra-fold edges** — source and target sit in the same macro-row.
-//!    The port logic is the same as before: East->West or West->East based
-//!    purely on which node has the higher effective X coordinate.
+//! 1. **Standard forward edges** — source layer < target layer.
+//!    Default: South → North. This applies to both adjacent layers and
+//!    edges that skip layers. With South→North, A* routes downward
+//!    through the LAYER_GUTTER channels. Perpendicular alternates
+//!    (East→North, West→North) are provided so A* can detour around
+//!    obstacles.
 //!
-//! 2. **Wrap-around edges** — source is at the end of one macro-row and
-//!    target is at the start of the next (or vice versa). Generate
-//!    South->North or South->East stalk cells to guide A* through the
-//!    macro-row gutter.
+//! 2. **Back-edges (feedback loops)** — source layer >= target layer
+//!    after topological sort. Default pairs force the A* router to
+//!    exit the side of the node, travel up the clear vertical flanks
+//!    of the diagram, and re-enter the side of the target.
 //!
-//! 3. **Vertical skip edges** — edges that span multiple macro-rows.
-//!    Generate North/South ports so the route can traverse vertically
-//!    through the MACRO_ROW_GUTTERs.
-//!
-//! Back-edge port candidates remain unchanged — they already use the
-//! physical geometry of the two nodes and the south channel.
+//! 3. **Same-layer edges** — source and target at the same Y position.
+//!    Use East → West or West → East based on their X ordering.
 
 use crate::ast::{NodeSize, Point, PortDirection};
 
@@ -66,23 +66,21 @@ pub(crate) fn outward_offset(direction: PortDirection) -> (i32, i32) {
 }
 
 /// Choose the *primary* (source, target) port pair for a forward edge.
-/// Equivalent to `forward_port_candidates(from, to)[0]`; kept as a
-/// convenience for callers that don't need the alternates.
 #[cfg(test)]
 pub(crate) fn pick_forward_ports(from: Point, to: Point) -> (PortDirection, PortDirection) {
     forward_port_candidates(from, to)[0]
 }
 
 /// Generate a small, ranked set of (source, target) port pair candidates
-/// for a non-cyclic edge in a boustrophedon (serpentine macro-row) layout.
+/// for a non-cyclic edge in a Top-to-Bottom layout.
 ///
-/// **Geometry-based** — we evaluate whether source is to the left or right
-/// of target, regardless of topological layer index. This is essential
-/// because layers in odd macro-rows flow right-to-left, so a "forward"
-/// edge may exit East or West depending on physical X position.
+/// **TTB semantics**: time flows downward. The primary candidate is
+/// South→North (source exits bottom, target enters top). When the edge
+/// is between nodes at the same Y (same-layer), East↔West or West↔East
+/// is used instead, based on their X ordering.
 ///
-/// The candidates are ranked: primary axis pair first, then perpendicular
-/// alternates so A* can detour around obstacles.
+/// Perpendicular alternates (East→North, West→North) let A* detour
+/// around obstacles while still entering the target from the top.
 pub(crate) fn forward_port_candidates(
     from: Point,
     to: Point,
@@ -90,79 +88,62 @@ pub(crate) fn forward_port_candidates(
     let dx = to.x - from.x;
     let dy = to.y - from.y;
 
-    // Use the same geometric decision as before — it already works for
-    // both pure LTR and boustrophedon because it reasons about *physical*
-    // positions, not layer indices.
-    let prefer_horizontal = if dx == 0 && dy != 0 {
-        false
-    } else if dy == 0 {
-        true
-    } else {
-        dx.abs() >= dy.abs()
-    };
+    // TTB: default flow is downward (South→North).
+    // If nodes are at the same Y (or very close), treat as same-layer.
+    let same_layer = dy == 0;
 
-    let (primary_src, tgt) = if prefer_horizontal {
+    if same_layer {
+        // Same-layer edge: use East→West or West→East based on X ordering.
         if dx >= 0 {
+            vec![
+                (PortDirection::East, PortDirection::West),
+                (PortDirection::North, PortDirection::South),
+                (PortDirection::South, PortDirection::North),
+            ]
+        } else {
+            vec![
+                (PortDirection::West, PortDirection::East),
+                (PortDirection::North, PortDirection::South),
+                (PortDirection::South, PortDirection::North),
+            ]
+        }
+    } else {
+        // Standard forward edge flowing downward: South→North is primary.
+        // Perpendicular alternates let A* route around congestion.
+        let (perp_near, perp_far) = if dx >= 0 {
             (PortDirection::East, PortDirection::West)
         } else {
             (PortDirection::West, PortDirection::East)
-        }
-    } else if dy > 0 {
-        (PortDirection::South, PortDirection::North)
-    } else {
-        (PortDirection::North, PortDirection::South)
-    };
+        };
 
-    // Perpendicular alternates: nearer side first (in the direction of
-    // the cross-axis delta) so the candidate ordering matches geometry.
-    let (perp_near, perp_far) = if prefer_horizontal {
-        if dy >= 0 {
-            (PortDirection::South, PortDirection::North)
-        } else {
-            (PortDirection::North, PortDirection::South)
-        }
-    } else if dx >= 0 {
-        (PortDirection::East, PortDirection::West)
-    } else {
-        (PortDirection::West, PortDirection::East)
-    };
-
-    // For boustrophedon wrap-around (where source is at the right end of
-    // macro-row N and target at the left end of macro-row N+1),
-    // dx might be negative even though the edge is topologically "forward".
-    // The geometry-based logic above already handles this — if to.x < from.x
-    // it correctly emits West->East. This is fine because A* will find the
-    // path South through the macro-row gutter regardless.
-
-    vec![(primary_src, tgt), (perp_near, tgt), (perp_far, tgt)]
+        vec![
+            (PortDirection::South, PortDirection::North),
+            (perp_near, PortDirection::North),
+            (perp_far, PortDirection::North),
+        ]
+    }
 }
 
 /// Generate the candidate (source, target) port pairs for a **back-edge**
 /// (or any edge where `is_cyclic == true`).
 ///
-/// Topological layout expands layers horizontally, so the band of empty
-/// canvas directly *underneath* every node is the most reliable routing
-/// channel in the diagram. We therefore drive cyclic edges down through
-/// the South face on both ends as the primary plan and degrade through
-/// progressively less-preferred fallbacks: side-only U-bends, then a
-/// mixed South-out / side-in approach, and finally the original
-/// North-entry variants for the rare cases where the south channel is
-/// fully congested. Every candidate is real so a strict-orthogonal A*
-/// can always find a legal escape route.
+/// In TTB layout, back-edges must route from a lower layer back up to a
+/// higher layer (feedback from the bottom of the diagram to the top).
+/// The most reliable path uses the vertical flanks of the diagram —
+/// exit the side of the source, travel up, and re-enter the side of the
+/// target. East→East or West→West pairs (same-side routing) produce a
+/// clean U-bend that stays well clear of forward edges running down the
+/// centre.
 ///
-/// In a boustrophedon layout back-edges may also need to navigate
-/// macro-row gutters, but the South-channel strategy already handles
-/// this naturally because the South channel sits below the lowest
-/// node in any given macro-row.
+/// If the sides are blocked (congested), fall through to South→South
+/// (bottom-out-and-around) and then to mixed South→side approaches.
 pub(crate) fn back_port_candidates(
     from: Point,
     to: Point,
 ) -> Vec<(PortDirection, PortDirection)> {
     use PortDirection::*;
 
-    // The near-side is the entry face closest to the source's
-    // horizontal position relative to the target — re-entering on the
-    // near side keeps the U-bend short.
+    // Determine which side of the target the source sits on.
     let dx = to.x - from.x;
     let near_side = if dx >= 0 { West } else { East };
     let far_side = match near_side {
@@ -171,17 +152,19 @@ pub(crate) fn back_port_candidates(
     };
 
     vec![
-        // Preferred: down-and-up through the south channel.
+        // Preferred: side-to-side U-bends up the flanks.
+        (near_side, near_side),
+        (far_side, far_side),
+        // Side-out → mixed re-entry
+        (near_side, South),
+        (far_side, South),
+        (near_side, North),
+        (far_side, North),
+        // Bottom-out alternatives (fallback when sides are blocked).
         (South, South),
         (South, near_side),
         (South, far_side),
-        // Side-only approaches when the bottom-out path is blocked.
-        (near_side, near_side),
-        (far_side, far_side),
-        (near_side, South),
-        (far_side, South),
-        // Last-resort: top-channel U-bend (the regression we wanted to
-        // avoid, but still better than a panic).
+        // Last-resort top-channel.
         (South, North),
         (North, North),
         (North, South),
