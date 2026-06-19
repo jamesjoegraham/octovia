@@ -5,7 +5,11 @@
 //!   octovia input.dsl -o output.svg
 //!   octovia input.dsl --width 800 --height 600
 //!   octovia input.dsl --theme ocean
+//!   octovia input.dsl --theme ocean
 //!   octovia input.json --json                  # JSON-format input
+//!   octovia input.dsl --png                     # render to PNG (1x)
+//!   octovia input.dsl --png --scale 2           # Retina PNG
+//!   octovia input.dsl --jpeg --quality 90       # JPEG at quality 90
 //!   cat input.dsl | octovia                    # pipe mode
 
 use std::fs;
@@ -58,6 +62,22 @@ struct Cli {
     /// List all available themes and exit.
     #[arg(long)]
     list_themes: bool,
+
+    /// Render to PNG instead of SVG. (default scale: 1x)
+    #[arg(long)]
+    png: bool,
+
+    /// Render to JPEG instead of SVG.
+    #[arg(long)]
+    jpeg: bool,
+
+    /// Output scale factor for PNG/JPEG (0.1 – 10.0, default: 1.0).
+    #[arg(long, default_value_t = 1.0)]
+    scale: f32,
+
+    /// JPEG quality (1–100, default: 85). Only used with --jpeg.
+    #[arg(long, default_value_t = 85)]
+    quality: u8,
 }
 
 fn main() {
@@ -142,16 +162,61 @@ fn main() {
     octovia::measure::measure_diagram(&mut diagram);
     octovia::layout::layout_backbone(&mut diagram);
     octovia::routing::route_all_edges(&mut diagram);
+
+    // --- Handle PNG/JPEG output ---
+    if cli.png || cli.jpeg {
+        let svg = octovia::svg_output::render_svg(&diagram);
+
+        let ext = if cli.jpeg { "jpg" } else { "png" };
+
+        let output_path: PathBuf = cli.output.unwrap_or_else(|| {
+            if let Some(ref name) = input_name {
+                let p = PathBuf::from(name);
+                let stem = p.file_stem().unwrap_or(p.as_os_str());
+                let mut out = p.with_file_name(stem);
+                out.set_extension(ext);
+                out
+            } else {
+                eprintln!("error: --{} requires an input file path or -o to name the output", ext);
+                std::process::exit(1);
+            }
+        });
+
+        if cli.jpeg {
+            octovia::png_export::render_svg_to_jpeg_bytes(&svg, cli.scale, cli.quality)
+                .and_then(|bytes| {
+                    fs::write(&output_path, &bytes)
+                        .map_err(|e| format!("cannot write JPEG: {e}"))
+                })
+                .unwrap_or_else(|e| {
+                    eprintln!("error: {e}");
+                    std::process::exit(1);
+                });
+            eprintln!("wrote {} (JPEG, scale={}, quality={})", output_path.display(), cli.scale, cli.quality);
+        } else {
+            octovia::png_export::render_svg_to_png_bytes(&svg, cli.scale)
+                .and_then(|bytes| {
+                    fs::write(&output_path, &bytes)
+                        .map_err(|e| format!("cannot write PNG: {e}"))
+                })
+                .unwrap_or_else(|e| {
+                    eprintln!("error: {e}");
+                    std::process::exit(1);
+                });
+            eprintln!("wrote {} (PNG, scale={})", output_path.display(), cli.scale);
+        }
+        return;
+    }
+
+    // --- SVG output ---
     let svg = octovia::svg_output::render_svg(&diagram);
 
-    // --- Write output ---
     if cli.stdout {
         print!("{svg}");
         return;
     }
 
     let output_path: PathBuf = cli.output.unwrap_or_else(|| {
-        // Derive from input
         if let Some(ref name) = input_name {
             let p = PathBuf::from(name);
             let stem = p.file_stem().unwrap_or(p.as_os_str());
@@ -159,7 +224,6 @@ fn main() {
             out.set_extension("svg");
             out
         } else {
-            // Stdin mode without -o: write to stdout anyway
             eprintln!("note: no input file path or -o given; writing to stdout");
             print!("{svg}");
             std::process::exit(0);

@@ -31,6 +31,9 @@ pub mod parser;
 pub mod routing;
 pub mod svg_output;
 
+/// Raster image export — render diagrams to PNG or JPEG bytes/files.
+pub mod png_export;
+
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 
