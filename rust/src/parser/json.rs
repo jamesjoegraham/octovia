@@ -64,6 +64,7 @@ pub fn parse_json(json: &str) -> Result<Diagram, String> {
                 is_cyclic: false,
                 route: Vec::new(),
                 label_anchor: None,
+                is_star: false,
             }
         })
         .collect();

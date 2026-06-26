@@ -29,7 +29,7 @@ use crate::label_placement::seek_label_anchor;
 
 use astar::astar_cells;
 use lanes::assign_parallel_lanes;
-use ports::{back_port_candidates, forward_port_candidates, outward_offset, port_cell};
+use ports::{back_port_candidates, forward_port_candidates, star_port_candidates, outward_offset, port_cell};
 
 /// Route every edge through the universal A* router, then spread
 /// parallel lanes, then place edge labels against the final geometry.
@@ -78,20 +78,37 @@ pub fn route_all_edges(diagram: &mut Diagram) {
 
         let candidates = if is_cyclic {
             back_port_candidates(from, to)
+        } else if diagram.edges[ei].is_star {
+            // Star edges: use the compass position of the spoke relative
+            // to the hub to determine port pairs. The spoke is either
+            // directly N/S/E/W of the hub (single port pair) or at a
+            // diagonal (use two candidate pairs).
+            star_port_candidates(from, to)
         } else {
             forward_port_candidates(from, to)
         };
 
-        let cells = best_route(
-            from,
-            to,
-            src_size,
-            tgt_size,
-            &candidates,
-            &occupancy,
-            &diagram.edges[ei].from,
-            &diagram.edges[ei].to,
-        );
+        let cells = if diagram.edges[ei].is_star {
+            // Star edges: generate a direct orthogonal route from hub port
+            // to spoke port. No A* needed — the compass directions tell us
+            // exactly which way to go, and A* can produce jittery paths on
+            // these short hops due to grid-cell quantization.
+            let port_pair = &candidates[0];
+            let port_src = port_cell(from, src_size, port_pair.0);
+            let port_tgt = port_cell(to, tgt_size, port_pair.1);
+            direct_star_route(port_src, port_tgt)
+        } else {
+            best_route(
+                from,
+                to,
+                src_size,
+                tgt_size,
+                &candidates,
+                &occupancy,
+                &diagram.edges[ei].from,
+                &diagram.edges[ei].to,
+            )
+        };
 
         // Convert grid cells back to pixel coordinates and bookend with
         // the source / target centres so SVG `trim_route_to_node_boundaries`
@@ -217,6 +234,47 @@ fn snap_endpoint_to_cell_axis(endpoint: Point, cell_x: i32, cell_y: i32) -> Poin
     } else {
         Point::new(endpoint.x, port_py)
     }
+}
+
+/// Generate a clean orthogonal route between two port cells for a
+/// star (hub-and-spoke) edge. Returns a cell sequence that takes
+/// exactly one orthogonal step from the source port, walks directly
+/// to the target's row/column, then steps into the target port.
+///
+/// This avoids running A* on very short star-hop distances where
+/// grid-cell quantization creates jittery zigzags.
+fn direct_star_route(port_src: (i32, i32), port_tgt: (i32, i32)) -> Vec<(i32, i32)> {
+    let (sx, sy) = port_src;
+    let (tx, ty) = port_tgt;
+
+    // For a clean orthogonal L-shaped path: port_src → corner → port_tgt.
+    let mut cells = Vec::with_capacity(8);
+    cells.push(port_src);
+
+    // Walk horizontally from source to target X, then vertically to target Y.
+    let mut cx = sx;
+    let mut cy = sy;
+    let dx = (tx - cx).signum();
+    let dy = (ty - cy).signum();
+
+    if dx != 0 {
+        // Move horizontally first.
+        while cx != tx {
+            cx += dx;
+            cells.push((cx, cy));
+        }
+    }
+    if dy != 0 {
+        // Then move vertically.
+        while cy != ty {
+            cy += dy;
+            cells.push((cx, cy));
+        }
+    }
+
+    // Deduplicate consecutive identical entries.
+    cells.dedup();
+    cells
 }
 
 /// Rasterise an octilinear pixel polyline into the grid cells it covers.

@@ -94,6 +94,7 @@ pub fn parse_dsl(input: &str) -> Result<Diagram, String> {
                 is_cyclic: false,
                 route: Vec::new(),
                 label_anchor: None,
+                is_star: false,
             });
         } else {
             return Err(format!("Unrecognised line: {trimmed}"));

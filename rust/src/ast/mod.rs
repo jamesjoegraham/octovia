@@ -55,6 +55,10 @@ pub struct Edge {
     pub route: Vec<Point>,
     /// Resolved label anchor (filled in Phase 3 alongside the route).
     pub label_anchor: Option<EdgeLabelAnchor>,
+    /// Whether this edge is part of a star (hub-and-spoke) layout.
+    /// Star edges use compass-direction-specific port pairs instead
+    /// of the standard TTB port selection.
+    pub is_star: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +153,7 @@ mod tests {
                     is_cyclic: false,
                     route: vec![Point::new(100, 100), Point::new(200, 100)],
                     label_anchor: None,
+                    is_star: false,
                 },
             ],
             title: None,

@@ -16,6 +16,8 @@
 //! screen), L(v) → higher Y value (lower on screen). This aligns with
 //! native vertical scrolling on mobile and desktop.
 
+pub mod star;
+
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use crate::ast::{Diagram, Point, Viewport};
@@ -273,6 +275,26 @@ pub fn layout_backbone(diagram: &mut Diagram) {
     // Tag edges with their cyclic status.
     for (ei, edge) in diagram.edges.iter_mut().enumerate() {
         edge.is_cyclic = back.contains(&ei);
+    }
+
+    // Star layout pass: detect hub nodes with ≥4 neighbours and place
+    // their spokes radially at compass positions around the hub.
+    let hubs = star::detect_hubs(diagram);
+    let spoke_ids: std::collections::HashSet<String> = hubs
+        .iter()
+        .flat_map(|h| h.spokes.iter().cloned())
+        .collect();
+    for h in &hubs {
+        let _assignments = star::layout_star(diagram, &h.hub_id, &h.spokes);
+    }
+
+    // Tag star edges: any edge where the source is a hub and the target
+    // is a spoke gets is_star = true, which tells the routing phase to
+    // use compass-direction-specific port pairs.
+    for edge in diagram.edges.iter_mut() {
+        if spoke_ids.contains(&edge.from) || spoke_ids.contains(&edge.to) {
+            edge.is_star = true;
+        }
     }
 
     // Viewport is informational only; layout is now fully label-driven.

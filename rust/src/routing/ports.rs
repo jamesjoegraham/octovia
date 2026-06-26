@@ -170,3 +170,55 @@ pub(crate) fn back_port_candidates(
         (North, South),
     ]
 }
+
+/// Generate candidate (source, target) port pairs for a **star/hub**
+/// edge — an edge from a central hub to a spoke node placed at a
+/// compass point around the hub.
+///
+/// The spoke's position relative to the hub tells us which direction
+/// to use. For cardinal directions (N, S, E, W) there's exactly one
+/// optimal port pair. For intercardinal directions (NE, NW, SE, SW)
+/// we try both the two cardinal faces that bracket the direction.
+pub(crate) fn star_port_candidates(
+    from: Point,
+    to: Point,
+) -> Vec<(PortDirection, PortDirection)> {
+    use PortDirection::*;
+
+    let dx = to.x - from.x;
+    let dy = to.y - from.y;
+
+    // Determine the primary direction: whichever axis has the larger
+    // absolute delta dominates.
+    let abs_dx = dx.abs();
+    let abs_dy = dy.abs();
+
+    if abs_dx >= abs_dy * 2 {
+        // Strongly horizontal: use East→West or West→East
+        if dx >= 0 {
+            vec![(East, West), (South, North), (North, South)]
+        } else {
+            vec![(West, East), (South, North), (North, South)]
+        }
+    } else if abs_dy >= abs_dx * 2 {
+        // Strongly vertical: use South→North or North→South
+        if dy >= 0 {
+            // Spoke is below the hub (South / SE / SW quadrant)
+            vec![(South, North), (East, North), (West, North)]
+        } else {
+            // Spoke is above the hub (North / NE / NW quadrant)
+            vec![(North, South), (East, South), (West, South)]
+        }
+    } else if abs_dx > abs_dy {
+        // Intercardinal: more horizontal than vertical, but close.
+        // Use the side port for exit and North/South for entry.
+        let side = if dx >= 0 { East } else { West };
+        let entry = if dy >= 0 { North } else { South };
+        vec![(side, entry), (South, North), (North, South)]
+    } else {
+        // Intercardinal: more vertical than horizontal, or equal.
+        let vertical = if dy >= 0 { South } else { North };
+        let side = if dx >= 0 { East } else { West };
+        vec![(vertical, if dy >= 0 { North } else { South }), (side, if dy >= 0 { North } else { South }), (match side { East => West, West => East, _ => side }, if dy >= 0 { North } else { South })]
+    }
+}
